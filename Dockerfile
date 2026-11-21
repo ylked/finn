@@ -16,7 +16,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.17 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock* ./
 RUN uv sync --no-dev --no-install-project $( [ -f uv.lock ] && echo --frozen )
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" HOME=/tmp XDG_CACHE_HOME=/tmp/.cache
 COPY backend/ ./
 COPY --from=web /web/dist /app/static
 RUN useradd -r -u 1000 finn && mkdir -p /data/uploads && chown -R finn /data /app

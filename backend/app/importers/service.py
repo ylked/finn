@@ -109,6 +109,12 @@ def import_entries(
     db.flush()
     res = ImportResult(batch.id, account.id, filename, total=len(entries))
 
+    # remember the account holder's name(s): money from/to them is an own-account transfer
+    if statement and statement.owner:
+        names = list((ledger.settings or {}).get("owner_names", []))
+        if statement.owner not in names:
+            ledger.settings = {**(ledger.settings or {}), "owner_names": [*names, statement.owner]}
+
     # Opening balance from the earliest camt statement, unless configured manually earlier
     if statement and statement.opening_balance is not None and statement.from_date:
         opening_date = statement.from_date - dt.timedelta(days=1)

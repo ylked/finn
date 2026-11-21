@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ai_timeout: float = 60.0
     ai_max_concurrency: int = 4
     ai_worker_interval: float = 3.0
+    worker_enabled: bool = True
 
     @property
     def ai_enabled(self) -> bool:

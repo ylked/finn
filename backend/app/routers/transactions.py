@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import accounting as acc_svc
 from ..accounting import AccountingError, LineIn
-from ..ai.classify import split_lines
+from ..ai.classify import apply_rules_to_unclassified, split_lines
 from ..auth import Ctx, ctx, writer
 from ..db import get_db
 from ..importers.service import book_entry
@@ -149,6 +149,13 @@ def _descendants(db: Session, ledger_id: int, account_id: int) -> list[int]:
             out.append(ch)
             stack.append(ch)
     return out
+
+
+@router.post("/transactions/apply-rules")
+def apply_rules_now(c: Ctx = Depends(writer), db: Session = Depends(get_db)):
+    n = apply_rules_to_unclassified(db, c.ledger.id)
+    db.commit()
+    return {"classified": n}
 
 
 @router.get("/transactions/stats")
@@ -398,6 +405,8 @@ def create_rule(body: RuleIn, c: Ctx = Depends(writer), db: Session = Depends(ge
         raise HTTPException(422, "Invalid direction")
     r = ClassificationRule(ledger_id=c.ledger.id, **body.model_dump())
     db.add(r)
+    db.flush()
+    apply_rules_to_unclassified(db, c.ledger.id)
     db.commit()
     return r
 

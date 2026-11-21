@@ -3,6 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://finn:finn@127.0.0.1:55432/finn_test")
 os.environ["AUTH_MODE"] = "disabled"
+os.environ["WORKER_ENABLED"] = "false"  # tests drive the worker functions directly
 os.environ["AI_BASE_URL"] = ""
 os.environ["UPLOAD_DIR"] = "/tmp/finn-test-uploads"
 

@@ -22,10 +22,12 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     if settings.secret_key in ("", "change-me") and settings.auth_mode != "disabled":
         raise RuntimeError("SECRET_KEY must be set")
-    worker.start()
+    if settings.worker_enabled:
+        worker.start()
     log.info("Finn started (auth=%s, ai=%s, vision=%s)", settings.auth_mode, settings.ai_enabled, settings.vision_enabled)
     yield
-    worker.stop()
+    if settings.worker_enabled:
+        worker.stop()
 
 
 app = FastAPI(title="Finn", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
@@ -74,7 +76,7 @@ def health():
 static = Path(settings.static_dir)
 
 
-@app.get("/{path:path}", include_in_schema=False)
+@app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def spa(path: str):
     if path.startswith("api/"):
         return JSONResponse({"detail": "Not found"}, status_code=404)

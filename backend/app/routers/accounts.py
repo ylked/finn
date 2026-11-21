@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..accounting import AccountingError, balances, create_person_account, rollup, set_opening_balance
+from ..ai.classify import apply_rules_to_unclassified
 from ..auth import Ctx, ctx, writer
 from ..config import get_settings
 from ..db import get_db
@@ -159,5 +160,6 @@ def create_person(body: PersonIn, c: Ctx = Depends(writer), db: Session = Depend
         acc = create_person_account(db, c.ledger.id, body.name.strip(), body.owed_to_me)
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
+    apply_rules_to_unclassified(db, c.ledger.id)
     db.commit()
     return _out(acc, {})

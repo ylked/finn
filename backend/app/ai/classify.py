@@ -153,6 +153,8 @@ counter-account. Rules:
 liability account, NOT an expense.
 - A payment to a credit card issuer settles the credit card liability account.
 - If a person (individual name) sends money and a receivable account exists for that person, use it.
+- The user (account holder) is: {owners}. Money from/to the user's own name is a transfer between the user's \
+own accounts (e.g. online payment accounts, savings), never income or expense.
 - Use the user's past classifications as strong evidence.
 - Never invent account codes. Answer with JSON only:
 {{"account_code": "<code>", "confidence": <0..1>, "reason": "<short reason in {lang}>", "counterparty": "<clean merchant or person name>"}}"""
@@ -192,7 +194,12 @@ def classify_with_ai(db: Session, tx: Transaction) -> bool:
     messages = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT.format(ccy=ledger.base_currency, source=source.account.name, lang=lang),
+            "content": SYSTEM_PROMPT.format(
+                ccy=ledger.base_currency,
+                source=source.account.name,
+                lang=lang,
+                owners=", ".join((ledger.settings or {}).get("owner_names", [])) or "unknown",
+            ),
         },
         {
             "role": "user",
@@ -227,3 +234,16 @@ def classify_with_ai(db: Session, tx: Transaction) -> bool:
 
 def amount_str(d: Decimal) -> str:
     return f"{d:.2f}"
+
+
+def apply_rules_to_unclassified(db: Session, ledger_id: int) -> int:
+    """Run rules / person matching on entries still sitting on the suspense account."""
+    n = 0
+    for tx in db.scalars(
+        select(Transaction).where(Transaction.ledger_id == ledger_id, Transaction.state == "unclassified")
+    ):
+        if apply_rules(db, tx):
+            if tx.ai_status == "pending":
+                tx.ai_status = "done"
+            n += 1
+    return n

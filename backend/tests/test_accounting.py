@@ -188,3 +188,16 @@ def test_delete_import_batch(client, accounts):
     # re-import of that file works again
     r = client.post("/api/imports", files=camt_files()).json()
     assert len([x for x in r["results"] if x["status"] == "ok"]) == 1
+
+
+def test_rule_and_person_apply_to_existing_unclassified(client, accounts):
+    bank = accounts["1020"]["id"]
+    client.patch(f"/api/accounts/{bank}", json={"iban": "CH690027427423101840J"})
+    client.post("/api/imports", files=camt_files())
+    before = client.get("/api/transactions/stats").json()["by_state"]["unclassified"]
+    client.post("/api/rules", json={"pattern": "uber", "target_account_id": accounts["4120"]["id"]})
+    client.post("/api/accounts/persons", json={"name": "Maelys Buehler"})
+    after = client.get("/api/transactions/stats").json()["by_state"]
+    n_uber = client.get("/api/transactions", params={"q": "UBER"}).json()["total"]
+    assert after["unclassified"] == before - n_uber - 1
+    assert after["auto"] == n_uber + 1

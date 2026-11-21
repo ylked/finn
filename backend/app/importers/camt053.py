@@ -124,6 +124,14 @@ def _party_name(party: etree._Element | None) -> str | None:
 
 
 _CARD_RE = re.compile(r"//\s*\d{4}X+\d{4}[^/]*//\s*(.+)$")
+_CARD_MASK = re.compile(r"\s*//\s*\d{4}X+\d{4}(\s+\d{2}/\d{2})?")
+
+
+def _clean_text(text: str | None) -> str | None:
+    """Drop masked card numbers / expiry and collapse whitespace."""
+    if not text:
+        return text
+    return re.sub(r"\s+", " ", _CARD_MASK.sub("", text)).strip()
 
 
 def _clean_counterparty_from_text(text: str) -> str | None:
@@ -194,7 +202,7 @@ def _entry_from(ntry: etree._Element, tx: etree._Element | None, idx: int, n_tx:
     if not counterparty:
         counterparty = _clean_counterparty_from_text(text_for_cp)
 
-    description = " | ".join(x for x in dict.fromkeys([addtl_tx or addtl_ntry, remittance]) if x) or (
+    description = " | ".join(x for x in dict.fromkeys([_clean_text(addtl_tx or addtl_ntry), remittance]) if x) or (
         counterparty or ""
     )
 
