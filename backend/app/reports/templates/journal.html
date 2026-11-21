@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<table>
+<tr><th style="width:17mm">{{ t.date }}</th><th style="width:12mm">#</th><th>{{ t.account }}</th><th class="num">{{ t.debit }}</th><th class="num">{{ t.credit }}</th></tr>
+{% for tx in d %}
+<tr class="grp"><td>{{ date(tx.date) }}</td><td>{{ tx.id }}</td><td colspan="3">{{ tx.description }}{% if tx.counterparty %} · {{ tx.counterparty }}{% endif %}{% if tx.state != 'confirmed' %} <span class="warn small">({{ t['state_' + tx.state] }})</span>{% endif %}</td></tr>
+{% for l in tx.lines %}
+<tr><td></td><td></td><td style="padding-left:{{ 6 if l.credit else 1.5 }}mm">{{ l.code }} {{ l.name }}{% if l.memo %} <span class="muted small">– {{ l.memo }}</span>{% endif %}</td>
+<td class="num">{{ money(l.debit) if l.debit else '' }}</td><td class="num">{{ money(l.credit) if l.credit else '' }}</td></tr>
+{% endfor %}
+{% endfor %}
+</table>
+{% endblock %}

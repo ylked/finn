@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+{% for a in d %}
+<h2>{{ a.account.code }} {{ a.account.name }}</h2>
+<table>
+<tr><th style="width:17mm">{{ t.date }}</th><th>{{ t.description }}</th><th style="width:22mm">{{ t.counter }}</th>
+<th class="num">{{ t.debit }}</th><th class="num">{{ t.credit }}</th><th class="num">{{ t.balance }}</th></tr>
+<tr class="muted"><td></td><td>{{ t.opening }}</td><td></td><td></td><td></td><td class="num">{{ money(a.opening) }}</td></tr>
+{% for r in a.rows %}
+<tr><td>{{ date(r.date) }}</td><td>{{ r.description }}{% if r.counterparty %} <span class="muted small">· {{ r.counterparty }}</span>{% endif %}</td>
+<td class="small">{{ r.counter }}</td>
+<td class="num">{{ money(r.debit) if r.debit else '' }}</td><td class="num">{{ money(r.credit) if r.credit else '' }}</td>
+<td class="num">{{ money(r.balance) }}</td></tr>
+{% endfor %}
+<tr class="tot"><td></td><td>{{ t.closing }}</td><td></td><td class="num">{{ money(a.total_debit) }}</td>
+<td class="num">{{ money(a.total_credit) }}</td><td class="num">{{ money(a.closing) }}</td></tr>
+</table>
+{% endfor %}
+{% endblock %}

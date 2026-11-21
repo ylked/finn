@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% from "tree.html" import tree %}
+{% block content %}
+<h2>{{ t.income }}</h2>
+<table>{{ tree(d.income, money) }}
+<tr class="tot"><td>{{ t.total_income }}</td><td class="num">{{ money(d.total_income) }}</td></tr></table>
+<h2>{{ t.expenses }}</h2>
+<table>{{ tree(d.expenses, money) }}
+<tr class="tot"><td>{{ t.total_expenses }}</td><td class="num">{{ money(d.total_expenses) }}</td></tr></table>
+<h2>{{ t.result }}</h2>
+<table><tr class="tot"><td>{{ t.result }}</td><td class="num {{ 'neg' if d.result < 0 else '' }}">{{ money(d.result) }}</td></tr></table>
+{% endblock %}

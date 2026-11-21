@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+<style>@page { size: A4 landscape; }</style>
+{% block content %}
+<table class="small">
+<tr><th>{{ t.account }}</th>{% for m in d.months %}<th class="num">{{ m[5:] }}/{{ m[2:4] }}</th>{% endfor %}<th class="num">{{ t.total }}</th></tr>
+{% for r in d.rows %}
+<tr><td>{{ r.code }} {{ r.name }}</td>{% for m in d.months %}<td class="num">{{ money(r.months.get(m)) if r.months.get(m) else '' }}</td>{% endfor %}<td class="num"><b>{{ money(r.total) }}</b></td></tr>
+{% endfor %}
+</table>
+{% endblock %}

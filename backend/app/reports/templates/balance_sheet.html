@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% from "tree.html" import tree %}
+{% block content %}
+<div class="cols">
+<div>
+<h2>{{ t.assets }}</h2>
+<table>{{ tree(d.assets, money) }}
+<tr class="tot"><td>{{ t.total_assets }}</td><td class="num">{{ money(d.total_assets) }}</td></tr></table>
+</div>
+<div>
+<h2>{{ t.liabilities }}</h2>
+<table>{{ tree(d.liabilities, money) }}
+<tr><td>{{ t.result }}</td><td class="num">{{ money(d.result) }}</td></tr>
+<tr class="tot"><td>{{ t.total_liabilities }}</td><td class="num">{{ money(d.total_passive) }}</td></tr></table>
+</div>
+</div>
+<p><b>{{ t.net_worth }}:</b> {{ money(d.net_worth) }} {{ ccy }}</p>
+{% if not d.balanced %}<p class="warn">{{ t.unbalanced }}</p>{% endif %}
+{% endblock %}

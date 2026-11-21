@@ -1,0 +1,8 @@
+{% macro tree(rows, money) -%}
+{% for r in rows %}
+<tr class="{{ 'grp' if r.group else '' }}">
+  <td style="padding-left: {{ 1.5 + r.depth * 4 }}mm">{{ r.code }} {{ r.name }}</td>
+  <td class="num">{{ money(r.amount) }}</td>
+</tr>
+{% endfor %}
+{%- endmacro %}
