@@ -30,6 +30,7 @@ class ImportResult:
     total: int = 0
     new: int = 0
     duplicates: int = 0
+    zero: int = 0  # 0.00 lines (e.g. month-end closing entry without fees): no effect, not booked
     matched: int = 0
     classified_by_rule: int = 0
     errors: list[str] = field(default_factory=list)
@@ -135,6 +136,9 @@ def import_entries(
         )
     )
     for e in entries:
+        if e.amount == 0:
+            res.zero += 1
+            continue
         if e.dedup_key in existing:
             res.duplicates += 1
             continue

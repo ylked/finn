@@ -201,3 +201,18 @@ def test_rule_and_person_apply_to_existing_unclassified(client, accounts):
     n_uber = client.get("/api/transactions", params={"q": "UBER"}).json()["total"]
     assert after["unclassified"] == before - n_uber - 1
     assert after["auto"] == n_uber + 1
+
+
+def test_zero_amount_entry_is_skipped(client, accounts):
+    """UBS month-end statements carry a 0.00 closing entry when no fees are due."""
+    src = sorted(DATA.glob("*.xml"))[0].read_bytes()
+    zero = (b"<Ntry><Amt Ccy=\"CHF\">0.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>BOOK</Sts>"
+            b"<BookgDt><Dt>2026-01-02</Dt></BookgDt><ValDt><Dt>2026-01-02</Dt></ValDt>"
+            b"<AcctSvcrRef>ZERO0001</AcctSvcrRef><AddtlNtryInf>Balance of closing entries</AddtlNtryInf></Ntry>")
+    content = src.replace(b"</Stmt>", zero + b"</Stmt>")
+    r = client.post("/api/imports", files=[("files", ("zero.xml", content, "application/xml"))],
+                    data={"iban_map": '{"CH690027427423101840J": "new"}'}).json()
+    res = r["results"][0]
+    assert res["status"] == "ok", res
+    assert res["new"] == 1 and res["zero"] == 1
+    assert all(b["balance_ok"] for b in client.get("/api/imports").json())
