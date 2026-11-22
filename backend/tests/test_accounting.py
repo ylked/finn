@@ -216,3 +216,13 @@ def test_zero_amount_entry_is_skipped(client, accounts):
     assert res["status"] == "ok", res
     assert res["new"] == 1 and res["zero"] == 1
     assert all(b["balance_ok"] for b in client.get("/api/imports").json())
+
+
+def test_search_ignores_accents(client, accounts):
+    bank, exp = accounts["1020"]["id"], accounts["4100"]["id"]
+    client.post("/api/transactions", json={"date": "2026-01-10", "description": "Magasin d'électronique",
+                                           "counterparty": "Œuvre Café", "lines": [
+        {"account_id": bank, "amount": "-50"}, {"account_id": exp, "amount": "50"}]})
+    for q in ("electro", "ÉLECTRO", "oeuvre", "cafe"):
+        assert client.get("/api/transactions", params={"q": q}).json()["total"] == 1, q
+    assert client.get("/api/transactions", params={"q": "electrique"}).json()["total"] == 0

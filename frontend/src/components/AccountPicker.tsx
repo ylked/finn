@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { useAccounts } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { Account, AccountKind, AccountType } from '../lib/types'
-import { cls } from '../lib/format'
+import { cls, fold } from '../lib/format'
 import { Sheet } from './ui'
 
 const TYPES: AccountType[] = ['expense', 'income', 'asset', 'liability']
@@ -36,7 +36,7 @@ export function AccountPicker({
   const current = value ? byId.get(value) : undefined
 
   const list = useMemo(() => {
-    const s = q.trim().toLowerCase()
+    const s = fold(q.trim())
     return accounts.filter(
       (a) =>
         (allowGroups || !a.is_group) &&
@@ -44,7 +44,7 @@ export function AccountPicker({
         !exclude.includes(a.id) &&
         (!types || types.includes(a.type)) &&
         (!kinds || kinds.includes(a.kind)) &&
-        (!s || a.code.toLowerCase().startsWith(s) || a.name.toLowerCase().includes(s) || (a.keywords ?? '').toLowerCase().includes(s)),
+        (!s || fold(a.code).startsWith(s) || fold(a.name).includes(s) || fold(a.keywords).includes(s) || fold(a.description).includes(s)),
     )
   }, [accounts, q, types, kinds, exclude, allowGroups])
 

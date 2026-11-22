@@ -51,3 +51,13 @@ export function monthEnd(offset = 0): string {
 export function cls(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(' ')
 }
+
+/** Lower-case and strip accents for search: "Électronique" -> "electronique", "Œuvre" -> "oeuvre". */
+export function fold(s: string | null | undefined): string {
+  return (s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/œ/gi, 'oe')
+    .replace(/æ/gi, 'ae')
+    .toLowerCase()
+}

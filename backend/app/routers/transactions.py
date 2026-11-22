@@ -115,9 +115,10 @@ def list_transactions(
             exists().where(JournalLine.transaction_id == Transaction.id, func.abs(JournalLine.amount) == abs(amount))
         )
     if q:
-        like = f"%{q}%"
+        # accent-insensitive: "electro" finds "Électronique"
+        like = func.unaccent(f"%{q}%")
         stmt = stmt.where(
-            or_(Transaction.description.ilike(like), Transaction.counterparty.ilike(like), Transaction.notes.ilike(like))
+            or_(*(func.unaccent(col).ilike(like) for col in (Transaction.description, Transaction.counterparty, Transaction.notes)))
         )
     if unreconciled:
         stmt = stmt.where(
