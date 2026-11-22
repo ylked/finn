@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2 } from 'lucide-react'
+import { ArrowRightLeft, Bot, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -8,7 +8,7 @@ import { accountLabel, useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { Account, BankEntry, Transaction } from '../lib/types'
 import { AccountPicker } from './AccountPicker'
-import { Badge, Field, Money, Sheet, useToast } from './ui'
+import { Badge, Field, Money, Segmented, Sheet, useToast } from './ui'
 
 const PAYMENT = ['bank', 'credit_card', 'cash']
 
@@ -523,6 +523,103 @@ export function TxSheet({ id, onClose }: { id: number | null; onClose: () => voi
           <Link to={`/transactions/${q.data.id}`} className="text-xs text-slate-400 underline">#{q.data.id}</Link>
         </div>
       )}
+    </Sheet>
+  )
+}
+
+// ------------------------------------------------------------------ multi-selection
+/** Selection state for lists of entries. */
+export function useSelection() {
+  const [active, setActive] = useState(false)
+  const [ids, setIds] = useState<Set<number>>(new Set())
+  const toggle = (id: number, on?: boolean) =>
+    setIds((s) => {
+      const n = new Set(s)
+      if (on ?? !n.has(id)) n.add(id)
+      else n.delete(id)
+      return n
+    })
+  const stop = () => {
+    setActive(false)
+    setIds(new Set())
+  }
+  return { active, start: () => setActive(true), stop, ids, toggle, setIds, has: (id: number) => ids.has(id) }
+}
+export type Selection = ReturnType<typeof useSelection>
+
+/** Floating bar shown while selecting: count, select all, move to another account. */
+export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
+  const { t } = useI18n()
+  const [moving, setMoving] = useState(false)
+  if (!sel.active) return null
+  const all = allIds.length > 0 && allIds.every((id) => sel.ids.has(id))
+  return (
+    <>
+      <div className="pb-safe fixed inset-x-0 bottom-16 z-40 px-3 md:bottom-6 md:left-60 md:px-8">
+        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl bg-slate-900 p-2 pl-4 text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{t('n_selected', { n: sel.ids.size })}</span>
+          <button className="rounded-lg px-2 py-1.5 text-sm opacity-80 hover:opacity-100" onClick={() => sel.setIds(all ? new Set() : new Set(allIds))}>
+            {all ? t('select_none') : t('select_all')}
+          </button>
+          <button className="btn-primary px-3" aria-label={t('bulk_move')} disabled={!sel.ids.size} onClick={() => setMoving(true)}>
+            <ArrowRightLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t('bulk_move')}</span>
+          </button>
+          <button className="rounded-lg p-2 opacity-80 hover:opacity-100" onClick={sel.stop} aria-label={t('close')}>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <BulkMoveSheet open={moving} ids={[...sel.ids]} onClose={() => setMoving(false)} onDone={() => { setMoving(false); sel.stop() }} />
+    </>
+  )
+}
+
+const SKIP_REASONS = ['split', 'no_payment_side', 'account_not_used', 'statement_line', 'same_account', 'opening'] as const
+
+function BulkMoveSheet({ open, ids, onClose, onDone }: { open: boolean; ids: number[]; onClose: () => void; onDone: () => void }) {
+  const { t } = useI18n()
+  const toast = useToast()
+  const refresh = useRefreshLedger()
+  const [mode, setMode] = useState<'counter' | 'replace'>('counter')
+  const [from, setFrom] = useState<number | null>(null)
+  const [target, setTarget] = useState<number | null>(null)
+  const [confirm, setConfirm] = useState(true)
+  const run = useMutation({
+    mutationFn: () =>
+      api.post<{ updated: number; skipped: { id: number; reason: string }[] }>('/api/transactions/bulk-account', {
+        ids, account_id: target, from_account_id: mode === 'replace' ? from : null, confirm,
+      }),
+    onSuccess: (r) => {
+      refresh()
+      const reasons = SKIP_REASONS.map((k) => [k, r.skipped.filter((s) => s.reason === k).length] as const).filter(([, n]) => n)
+      const skipped = reasons.map(([k, n]) => `${n} ${t(`skip_${k}`)}`).join(', ')
+      toast(t('bulk_done', { n: r.updated }) + (skipped ? ` · ${t('bulk_skipped')}: ${skipped}` : ''), r.updated ? 'ok' : 'error')
+      if (r.updated) onDone()
+    },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
+  const ready = !!target && (mode === 'counter' || (!!from && from !== target))
+  return (
+    <Sheet open={open} onClose={onClose} title={t('bulk_title', { n: ids.length })}>
+      <div className="space-y-4">
+        <Segmented value={mode} onChange={setMode} options={[{ value: 'counter', label: t('bulk_mode_counter') }, { value: 'replace', label: t('bulk_mode_replace') }]} />
+        <p className="text-xs text-slate-500">{mode === 'counter' ? t('bulk_counter_help') : t('bulk_replace_help')}</p>
+        {mode === 'replace' && (
+          <Field label={t('bulk_from')}>
+            <AccountPicker value={from} onChange={(id) => setFrom(id)} />
+          </Field>
+        )}
+        <Field label={t('bulk_target')}>
+          <AccountPicker value={target} onChange={(id) => setTarget(id)} exclude={from ? [from] : []} />
+        </Field>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-0.5 accent-brand-700" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
+          {t('bulk_confirm')}
+        </label>
+        <button className="btn-primary w-full" disabled={!ready || run.isPending} onClick={() => run.mutate()}>
+          {t('bulk_apply', { n: ids.length })}
+        </button>
+      </div>
     </Sheet>
   )
 }

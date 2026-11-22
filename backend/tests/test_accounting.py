@@ -226,3 +226,43 @@ def test_search_ignores_accents(client, accounts):
     for q in ("electro", "ÉLECTRO", "oeuvre", "cafe"):
         assert client.get("/api/transactions", params={"q": q}).json()["total"] == 1, q
     assert client.get("/api/transactions", params={"q": "electrique"}).json()["total"] == 0
+
+
+def test_bulk_account_change(client, accounts):
+    a = {k: accounts[k]["id"] for k in ("1020", "4100", "4110", "4000")}
+    client.post("/api/imports", files=camt_files(), data={"iban_map": '{"CH690027427423101840J": "new"}'})
+    migros = client.get("/api/transactions", params={"q": "migros", "state": "unclassified"}).json()["items"]
+    assert len(migros) >= 2
+    ids = [t["id"] for t in migros]
+
+    # counter side mode: suspense -> groceries, bank line untouched
+    r = client.post("/api/transactions/bulk-account", json={"ids": ids, "account_id": a["4100"], "confirm": False}).json()
+    assert r == {"updated": len(ids), "skipped": []}
+    for t in client.get("/api/transactions", params={"q": "migros"}).json()["items"]:
+        assert t["state"] == "auto"
+        assert sorted(ln["account_code"] for ln in t["lines"]) == ["1020", "4100"]
+        assert all(ln["bank_entry_id"] for ln in t["lines"] if ln["account_code"] == "1020")
+
+    # replace mode, works inside a split; a manual entry not using the account is skipped
+    split = client.post("/api/transactions", json={"date": "2026-01-10", "description": "split", "lines": [
+        {"account_id": a["1020"], "amount": "-30"}, {"account_id": a["4100"], "amount": "20"},
+        {"account_id": a["4000"], "amount": "10"}]}).json()
+    other = client.post("/api/transactions", json={"date": "2026-01-10", "description": "rent", "lines": [
+        {"account_id": a["1020"], "amount": "-5"}, {"account_id": a["4000"], "amount": "5"}]}).json()
+    r = client.post("/api/transactions/bulk-account", json={
+        "ids": [*ids, split["id"], other["id"]], "account_id": a["4110"], "from_account_id": a["4100"]}).json()
+    assert r["updated"] == len(ids) + 1
+    assert r["skipped"] == [{"id": other["id"], "reason": "account_not_used"}]
+    got = client.get(f"/api/transactions/{split['id']}").json()
+    assert sorted(ln["account_code"] for ln in got["lines"]) == ["1020", "4000", "4110"]
+    assert client.get(f"/api/transactions/{ids[0]}").json()["state"] == "confirmed"
+
+    # counter-side mode skips splits; statement lines can't be moved; target can't be a group
+    r = client.post("/api/transactions/bulk-account", json={"ids": [split["id"]], "account_id": a["4000"]}).json()
+    assert r["skipped"] == [{"id": split["id"], "reason": "split"}]
+    r = client.post("/api/transactions/bulk-account", json={"ids": ids[:1], "account_id": a["4000"],
+                                                           "from_account_id": a["1020"]}).json()
+    assert r["skipped"][0]["reason"] == "statement_line"
+    assert client.post("/api/transactions/bulk-account", json={"ids": ids, "account_id": accounts["4"]["id"]}).status_code == 422
+    bs = client.get("/api/reports/balance-sheet", params={"at": "2026-12-31"}).json()
+    assert bs["balanced"]

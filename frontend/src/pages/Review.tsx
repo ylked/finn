@@ -1,11 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Check, CheckCheck, ChevronRight } from 'lucide-react'
+import { Bot, Check, CheckCheck, CheckSquare, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import { AccountPicker } from '../components/AccountPicker'
-import { StateBadge, TxSheet, txAmount } from '../components/Tx'
+import { BulkBar, StateBadge, TxSheet, txAmount, useSelection } from '../components/Tx'
 import { Empty, Money, PageTitle, Segmented, Spinner, useToast } from '../components/ui'
 import { api, qs } from '../lib/api'
-import { cents, fmtDate } from '../lib/format'
+import { cents, cls, fmtDate } from '../lib/format'
 import { useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { Transaction } from '../lib/types'
@@ -17,6 +17,7 @@ export function Review() {
   const refresh = useRefreshLedger()
   const [filter, setFilter] = useState<'auto' | 'unclassified' | 'all'>('all')
   const [open, setOpen] = useState<number | null>(null)
+  const sel = useSelection()
   const states = filter === 'all' ? ['auto', 'unclassified'] : [filter]
   const q = useQuery({
     queryKey: ['transactions', 'review', filter],
@@ -58,11 +59,18 @@ export function Review() {
     <div>
       <PageTitle
         actions={
-          autoIds.length > 0 && (
-            <button className="btn-primary" onClick={() => confirm(`${t('confirm_all')} (${autoIds.length}) ?`) && confirmMany.mutate(autoIds)}>
-              <CheckCheck className="h-4 w-4" /> {t('confirm_all')} ({autoIds.length})
-            </button>
-          )
+          <>
+            {items.length > 0 && (
+              <button className={sel.active ? 'btn-primary' : 'btn-secondary'} aria-label={t('select')} title={t('select')} onClick={() => (sel.active ? sel.stop() : sel.start())}>
+                <CheckSquare className="h-4 w-4" /> <span className="hidden sm:inline">{t('select')}</span>
+              </button>
+            )}
+            {autoIds.length > 0 && !sel.active && (
+              <button className="btn-primary" onClick={() => confirm(`${t('confirm_all')} (${autoIds.length}) ?`) && confirmMany.mutate(autoIds)}>
+                <CheckCheck className="h-4 w-4" /> {t('confirm_all')} ({autoIds.length})
+              </button>
+            )}
+          </>
         }
       >
         {t('review_title')}
@@ -82,8 +90,12 @@ export function Review() {
             const others = tx.lines.filter((l) => l !== src)
             const simple = others.length === 1
             return (
-              <div key={tx.id} className="card p-3">
-                <button className="flex w-full items-start gap-3 text-left" onClick={() => setOpen(tx.id)}>
+              <div key={tx.id} className={cls('card p-3', sel.has(tx.id) && 'ring-2 ring-brand-600')}>
+                <div className="flex items-start gap-3">
+                {sel.active && (
+                  <input type="checkbox" className="mt-1 h-4 w-4 accent-brand-700" checked={sel.has(tx.id)} onChange={(e) => sel.toggle(tx.id, e.target.checked)} />
+                )}
+                <button className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={() => (sel.active ? sel.toggle(tx.id) : setOpen(tx.id))}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">{tx.counterparty || tx.description}</span>
@@ -94,6 +106,7 @@ export function Review() {
                   <Money value={txAmount(tx)} sign colored className="font-semibold" />
                   <ChevronRight className="mt-0.5 h-4 w-4 text-slate-300" />
                 </button>
+                </div>
                 {tx.ai_reason && (
                   <div className="mt-2 flex items-start gap-1.5 text-xs text-violet-700 dark:text-violet-300">
                     <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -117,6 +130,8 @@ export function Review() {
           })}
         </div>
       )}
+      {sel.active && <div className="h-16" />}
+      <BulkBar sel={sel} allIds={items.map((x) => x.id)} />
       <TxSheet id={open} onClose={() => setOpen(null)} />
     </div>
   )

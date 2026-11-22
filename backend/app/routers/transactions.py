@@ -2,6 +2,7 @@ import datetime as dt
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -254,6 +255,67 @@ def confirm_many(ids: list[int], c: Ctx = Depends(writer), db: Session = Depends
             n += 1
     db.commit()
     return {"confirmed": n}
+
+
+class BulkAccountIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    account_id: int
+    # None: set the counter side (everything except the bank/card side), single-line counter sides only.
+    # Given: replace this account by account_id on every line that uses it (works inside splits too).
+    from_account_id: int | None = None
+    confirm: bool = True
+
+
+@router.post("/transactions/bulk-account")
+def bulk_account(body: BulkAccountIn, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
+    """Move many entries to another account at once. Statement-backed lines are never changed."""
+    target = db.get(Account, body.account_id)
+    if target is None or target.ledger_id != c.ledger.id or target.is_group or not target.is_active:
+        raise HTTPException(422, "Invalid target account")
+    txs = db.scalars(
+        select(Transaction)
+        .options(selectinload(Transaction.lines).selectinload(JournalLine.account))
+        .where(Transaction.ledger_id == c.ledger.id, Transaction.id.in_(body.ids))
+        .with_for_update(of=Transaction)
+    ).all()
+    updated, skipped = 0, []
+    for tx in txs:
+        if tx.source == "opening":
+            skipped.append({"id": tx.id, "reason": "opening"})
+            continue
+        if body.from_account_id is not None:
+            lines = [ln for ln in tx.lines if ln.account_id == body.from_account_id]
+            if not lines:
+                skipped.append({"id": tx.id, "reason": "account_not_used"})
+                continue
+            if any(ln.bank_entry_id for ln in lines):
+                skipped.append({"id": tx.id, "reason": "statement_line"})
+                continue
+        else:
+            src, _ = split_lines(tx)
+            others = [ln for ln in tx.lines if ln is not src and not ln.bank_entry_id]
+            if src is None or len(others) != 1:
+                skipped.append({"id": tx.id, "reason": "split" if src is not None else "no_payment_side"})
+                continue
+            lines = others
+        if any(ln.account_id == target.id for ln in tx.lines if ln not in lines):
+            # would put both sides on the same account
+            skipped.append({"id": tx.id, "reason": "same_account"})
+            continue
+        for ln in lines:
+            ln.account_id = target.id
+            ln.account = target
+        if any(ln.account.kind == "suspense" for ln in tx.lines):
+            tx.state = "unclassified"
+        elif body.confirm:
+            tx.state = "confirmed"
+        elif tx.state == "unclassified":
+            tx.state = "auto"
+        if tx.ai_status == "pending":
+            tx.ai_status = "done"
+        updated += 1
+    db.commit()
+    return {"updated": updated, "skipped": skipped}
 
 
 @router.post("/transactions/{tx_id}/reclassify", response_model=TransactionDetail)

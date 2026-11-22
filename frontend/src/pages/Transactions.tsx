@@ -1,9 +1,9 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { Filter, Search } from 'lucide-react'
+import { CheckSquare, Filter, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AccountPicker } from '../components/AccountPicker'
-import { TxRow, TxSheet } from '../components/Tx'
+import { BulkBar, TxRow, TxSheet, useSelection } from '../components/Tx'
 import { Empty, Money, PageTitle, Spinner } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { fmtDate } from '../lib/format'
@@ -19,6 +19,7 @@ export function Transactions() {
   const { byId } = useAccounts()
   const [open, setOpen] = useState<number | null>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const sel = useSelection()
   const accountId = sp.get('account_id') ? Number(sp.get('account_id')) : null
   const params = {
     account_id: accountId,
@@ -54,7 +55,16 @@ export function Transactions() {
 
   return (
     <div>
-      <PageTitle actions={<button className="btn-secondary" onClick={() => setShowFilters((x) => !x)}><Filter className="h-4 w-4" /></button>}>
+      <PageTitle
+        actions={
+          <>
+            <button className={sel.active ? 'btn-primary' : 'btn-secondary'} aria-label={t('select')} title={t('select')} onClick={() => (sel.active ? sel.stop() : sel.start())}>
+              <CheckSquare className="h-4 w-4" /> <span className="hidden sm:inline">{t('select')}</span>
+            </button>
+            <button className="btn-secondary" onClick={() => setShowFilters((x) => !x)}><Filter className="h-4 w-4" /></button>
+          </>
+        }
+      >
         {acc ? `${acc.code} ${acc.name}` : t('transactions')}
       </PageTitle>
       {acc && (
@@ -105,7 +115,13 @@ export function Transactions() {
             <div key={date}>
               <div className="sticky top-0 z-10 bg-slate-50/95 px-4 py-1 text-xs font-medium text-slate-500 backdrop-blur dark:bg-slate-950/90">{fmtDate(date, locale)}</div>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {txs.map((tx) => <TxRow key={tx.id} tx={tx} onClick={() => setOpen(tx.id)} />)}
+                {txs.map((tx) =>
+                  sel.active ? (
+                    <TxRow key={tx.id} tx={tx} selected={sel.has(tx.id)} onSelect={(v) => sel.toggle(tx.id, v)} onClick={() => sel.toggle(tx.id)} />
+                  ) : (
+                    <TxRow key={tx.id} tx={tx} onClick={() => setOpen(tx.id)} />
+                  ),
+                )}
               </div>
             </div>
           ))}
@@ -116,6 +132,8 @@ export function Transactions() {
           <button className="btn-secondary" onClick={() => q.fetchNextPage()} disabled={q.isFetchingNextPage}>{t('load_more')}</button>
         </div>
       )}
+      {sel.active && <div className="h-16" />}
+      <BulkBar sel={sel} allIds={items.map((x) => x.id)} />
       <TxSheet id={open} onClose={() => setOpen(null)} />
     </div>
   )
