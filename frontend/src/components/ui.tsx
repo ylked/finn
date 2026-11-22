@@ -71,8 +71,28 @@ function unlockScroll() {
   }
 }
 
-/** Bottom sheet on phones, centered dialog on larger screens. */
-export function Sheet({ open, onClose, title, children, wide = false }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; wide?: boolean }) {
+/** Visible area (shrinks when the on-screen keyboard opens on iOS/Android), tracked while `active`. */
+function useVisualViewport(active: boolean) {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!active || !vv) return
+    const update = () => setBox({ top: vv.offsetTop, height: vv.height })
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [active])
+  return box
+}
+
+/** Bottom sheet on phones, centered dialog on larger screens. `tall` (lists with a search box) fills
+ * the visible height on phones so results stay above the keyboard. */
+export function Sheet({ open, onClose, title, children, wide = false, tall = false }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; wide?: boolean; tall?: boolean }) {
+  const vv = useVisualViewport(open)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
@@ -93,16 +113,27 @@ export function Sheet({ open, onClose, title, children, wide = false }: { open: 
   // Portal to <body>: a sheet opened from inside a <label> (e.g. an AccountPicker in a Field) would
   // otherwise receive the label's activation click, which re-clicks the picker button and reopens it.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-x-0 top-0 z-50 flex h-dvh items-end justify-center md:items-center"
+      style={vv ? { top: vv.top, height: vv.height } : undefined}
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]" onClick={onClose} />
-      <div className={cls('relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-xl dark:bg-slate-900 md:rounded-2xl', wide ? 'md:max-w-3xl' : 'md:max-w-lg')}>
+      <div
+        className={cls(
+          'relative flex max-h-[92%] w-full flex-col rounded-t-3xl bg-white shadow-xl dark:bg-slate-900 md:max-h-[85%] md:rounded-2xl',
+          tall && 'h-[92%] md:h-auto',
+          wide ? 'md:max-w-3xl' : 'md:max-w-lg',
+        )}
+      >
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
           <div className="min-w-0 truncate font-semibold">{title}</div>
           <button className="btn-ghost -mr-2 p-2" onClick={onClose} aria-label="close">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="pb-safe overflow-y-auto overscroll-contain p-4">{children}</div>
+        <div className="pb-safe min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
       </div>
     </div>,
     document.body,

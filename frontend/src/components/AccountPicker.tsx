@@ -66,19 +66,21 @@ export function AccountPicker({
         <span className="min-w-0 truncate">{current ? `${current.code} · ${current.name}` : placeholder ?? t('choose_account')}</span>
         <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
       </button>
-      <Sheet open={open} onClose={() => setOpen(false)} title={placeholder ?? t('choose_account')}>
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <input
-            autoFocus
-            className="input pl-9"
-            placeholder={t('search')}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && list.length) pick(list[0])
-            }}
-          />
+      <Sheet open={open} onClose={() => setOpen(false)} title={placeholder ?? t('choose_account')} tall>
+        <div className="sticky -top-4 z-10 -mx-4 -mt-4 mb-3 bg-white px-4 pb-3 pt-4 dark:bg-slate-900">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              className="input pl-9"
+              placeholder={t('search')}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && list.length) pick(list[0])
+              }}
+            />
+          </div>
         </div>
         <div className="space-y-4">
           {grouped.map(([ty, xs]) => (
