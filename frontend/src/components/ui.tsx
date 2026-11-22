@@ -1,5 +1,6 @@
 import { X, Loader2 } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cls, money, num } from '../lib/format'
 
 export function Spinner({ className = '' }: { className?: string }) {
@@ -51,21 +52,47 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="py-10 text-center text-sm text-slate-500">{children}</div>
 }
 
+// Scroll lock shared by all open sheets: the first one locks, the last one to close unlocks.
+// (Saving/restoring the previous value per sheet breaks when nested sheets unmount together.)
+let scrollLocks = 0
+
+function lockScroll() {
+  if (scrollLocks++ === 0) {
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+  }
+}
+
+function unlockScroll() {
+  scrollLocks = Math.max(0, scrollLocks - 1)
+  if (scrollLocks === 0) {
+    document.documentElement.style.overflow = ''
+    document.body.style.overflow = ''
+  }
+}
+
 /** Bottom sheet on phones, centered dialog on larger screens. */
 export function Sheet({ open, onClose, title, children, wide = false }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; wide?: boolean }) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  // lock depends on `open` only, so it is taken once per opening (not on every re-render)
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    lockScroll()
+    return unlockScroll
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
     window.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-    }
-  }, [open, onClose])
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   if (!open) return null
-  return (
+  // Portal to <body>: a sheet opened from inside a <label> (e.g. an AccountPicker in a Field) would
+  // otherwise receive the label's activation click, which re-clicks the picker button and reopens it.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]" onClick={onClose} />
       <div className={cls('relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl bg-white shadow-xl dark:bg-slate-900 md:rounded-2xl', wide ? 'md:max-w-3xl' : 'md:max-w-lg')}>
@@ -77,7 +104,8 @@ export function Sheet({ open, onClose, title, children, wide = false }: { open: 
         </div>
         <div className="pb-safe overflow-y-auto overscroll-contain p-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
