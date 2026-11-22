@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     ai_worker_interval: float = 3.0
     worker_enabled: bool = True
 
+    # MCP server at /mcp (Model Context Protocol, for AI assistants)
+    mcp_enabled: bool = True
+    # also accept OAuth access tokens issued by the OIDC provider (e.g. claude.ai connectors);
+    # personal access tokens created in Settings always work
+    mcp_oauth: bool = False
+    mcp_oauth_audience: str = ""  # expected "aud"; defaults to OIDC_CLIENT_ID
+
     @property
     def ai_enabled(self) -> bool:
         return bool(self.ai_base_url and self.ai_text_model)

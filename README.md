@@ -17,6 +17,8 @@ in **double-entry accounting** (comptabilité en partie double), fed by bank sta
   transfer from bank to card that reconciles with both the bank statement and the card CSV.
 - **Reports** (screen, PDF, CSV): balance sheet, income statement, general ledger, journal, monthly table.
 - **OIDC login** (authentik or any OIDC provider), FR/EN interface, mobile-first.
+- **MCP server** at `/mcp`, so AI assistants (Claude, ChatGPT, Cursor…) can browse the books, answer
+  questions and record or classify entries.
 
 ## Quick start
 
@@ -64,6 +66,35 @@ AI_VISION_MODEL=gpt-4o-mini      # receipts (must accept images)
 
 Without AI configured, the app still works: rules classify entries, and receipt data is entered by hand.
 If the server rejects `response_format`, the app retries without it and extracts the JSON from the answer.
+
+### MCP (AI assistants)
+
+Finn serves a [Model Context Protocol](https://modelcontextprotocol.io) server at
+`https://finn.example.com/mcp` (streamable HTTP). In *Settings → AI assistant access*, create a token,
+read-only or read/write. The token is shown once. Then add the server to your client:
+
+```bash
+# Claude Code
+claude mcp add --transport http finn https://finn.example.com/mcp --header "Authorization: Bearer finn_..."
+```
+
+```json
+// Claude Desktop, Cursor, … (clients that take a URL + headers)
+{ "mcpServers": { "finn": { "type": "http", "url": "https://finn.example.com/mcp",
+                            "headers": { "Authorization": "Bearer finn_..." } } } }
+```
+
+Tools: `ledger_overview`, `list_accounts`, `search_transactions`, `get_transaction`, `balance_sheet`,
+`income_statement`, `monthly_report`, `account_ledger`, `receivables`, `list_rules` (read), and
+`create_transaction`, `classify_transaction` (single account or split), `update_transaction_lines`,
+`confirm_transactions`, `create_rule`, `create_person` (write tokens only). They go through the same
+validation as the web app: entries must balance, and statement lines keep their account and amount.
+
+**OAuth (claude.ai custom connectors).** With `MCP_OAUTH=true`, `/mcp` also accepts access tokens that
+authentik issues for Finn's OIDC application, and it advertises authentik through
+`/.well-known/oauth-protected-resource/mcp`. Add the client's callback
+(`https://claude.ai/api/mcp/auth_callback`) to the provider's redirect URIs. In the connector's advanced
+settings, enter Finn's client ID and secret. The authentik user must have logged in to Finn once.
 
 ### Local development
 

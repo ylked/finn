@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2 } from 'lucide-react'
+import { Check, Copy, KeyRound, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Field, PageTitle, Segmented, useToast } from '../components/ui'
 import { api } from '../lib/api'
+import { fmtDate } from '../lib/format'
 import { accountLabel, useAccounts, useMe } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { CsvProfile, Rule } from '../lib/types'
@@ -95,7 +96,104 @@ export function SettingsPage() {
         ))}
         {!profiles.data?.length && <div className="text-sm text-slate-400">—</div>}
       </div>
+      <McpCard />
       <p className="px-1 text-xs text-slate-500">{t('install_app')}</p>
+    </div>
+  )
+}
+
+type ApiToken = { id: number; name: string; prefix: string; can_write: boolean; created_at: string; last_used_at: string | null; expires_at: string | null }
+type McpInfo = { enabled: boolean; url: string; oauth: boolean }
+
+function CopyButton({ text }: { text: string }) {
+  const { t } = useI18n()
+  const [done, setDone] = useState(false)
+  return (
+    <button
+      type="button"
+      className="btn-secondary shrink-0 px-2.5"
+      onClick={() => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })}
+      aria-label={t('token_copy')}
+    >
+      {done ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+    </button>
+  )
+}
+
+function McpCard() {
+  const { t, locale } = useI18n()
+  const toast = useToast()
+  const qc = useQueryClient()
+  const info = useQuery({ queryKey: ['mcp-info'], queryFn: () => api.get<McpInfo>('/api/tokens/info') })
+  const tokens = useQuery({ queryKey: ['tokens'], queryFn: () => api.get<ApiToken[]>('/api/tokens') })
+  const [name, setName] = useState('')
+  const [write, setWrite] = useState(false)
+  const [days, setDays] = useState('')
+  const [created, setCreated] = useState<string | null>(null)
+  const create = useMutation({
+    mutationFn: () => api.post<ApiToken & { token: string }>('/api/tokens', { name: name.trim(), can_write: write, expires_days: days ? Number(days) : null }),
+    onSuccess: (r) => { setCreated(r.token); setName(''); setDays(''); qc.invalidateQueries({ queryKey: ['tokens'] }) },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
+  const revoke = useMutation({
+    mutationFn: (id: number) => api.del(`/api/tokens/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tokens'] }),
+  })
+  if (info.data && !info.data.enabled) {
+    return <div className="card p-4"><div className="font-medium">{t('mcp')}</div><p className="mt-1 text-xs text-slate-500">{t('mcp_disabled')}</p></div>
+  }
+  return (
+    <div className="card space-y-3 p-4">
+      <div className="flex items-center gap-2 font-medium"><KeyRound className="h-4 w-4" />{t('mcp')}</div>
+      <p className="text-xs text-slate-500">{t('mcp_help')}</p>
+      {info.data && (
+        <Field label={t('mcp_url')}>
+          <div className="flex gap-2">
+            <input className="input font-mono text-xs" readOnly value={info.data.url} onFocus={(e) => e.target.select()} />
+            <CopyButton text={info.data.url} />
+          </div>
+        </Field>
+      )}
+      {info.data?.oauth && <p className="text-xs text-slate-500">{t('mcp_oauth_on')}</p>}
+
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        {tokens.data?.map((k) => (
+          <div key={k.id} className="flex items-center gap-2 py-2 text-sm">
+            <div className="min-w-0 flex-1">
+              <div className="truncate">{k.name} <span className="font-mono text-xs text-slate-400">{k.prefix}…</span></div>
+              <div className="text-xs text-slate-500">
+                {k.can_write ? t('token_rw') : t('token_read')} · {k.last_used_at ? `${t('token_last_used')} ${fmtDate(k.last_used_at.slice(0, 10), locale)}` : t('token_never_used')}
+                {k.expires_at && ` · ${t('token_expires_on')} ${fmtDate(k.expires_at.slice(0, 10), locale)}`}
+              </div>
+            </div>
+            <button className="btn-ghost p-1.5 text-slate-400 hover:text-red-600" onClick={() => window.confirm(t('token_revoke_confirm')) && revoke.mutate(k.id)} aria-label={t('delete')}>
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {created && (
+        <div className="space-y-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <div>{t('token_created')}</div>
+          <div className="flex gap-2">
+            <input className="input font-mono text-xs" readOnly value={created} onFocus={(e) => e.target.select()} />
+            <CopyButton text={created} />
+          </div>
+        </div>
+      )}
+
+      <form className="space-y-3 border-t border-slate-100 pt-3 dark:border-slate-800" onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate() }}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label={t('token_name')}><input className="input" value={name} maxLength={100} placeholder="Claude" onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label={t('token_expires')}><input type="number" min={1} max={3650} className="input" value={days} onChange={(e) => setDays(e.target.value)} /></Field>
+        </div>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-0.5 accent-brand-700" checked={write} onChange={(e) => setWrite(e.target.checked)} />
+          {t('token_write')}
+        </label>
+        <button className="btn-primary" disabled={!name.trim() || create.isPending}>{t('token_create')}</button>
+      </form>
     </div>
   )
 }

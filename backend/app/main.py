@@ -10,7 +10,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import auth
 from .config import get_settings
 from .db import engine
-from .routers import accounts, imports, receipts, reports, transactions
+from .mcp_server import MCPHost
+from .routers import accounts, imports, receipts, reports, tokens, transactions
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -19,21 +20,28 @@ settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_api: FastAPI):
     if settings.secret_key in ("", "change-me") and settings.auth_mode != "disabled":
         raise RuntimeError("SECRET_KEY must be set")
     if settings.worker_enabled:
         worker.start()
-    log.info("Finn started (auth=%s, ai=%s, vision=%s)", settings.auth_mode, settings.ai_enabled, settings.vision_enabled)
-    yield
-    if settings.worker_enabled:
-        worker.stop()
+    log.info("Finn started (auth=%s, ai=%s, vision=%s, mcp=%s)", settings.auth_mode, settings.ai_enabled,
+             settings.vision_enabled, settings.mcp_enabled)
+    try:
+        if settings.mcp_enabled:
+            async with app.start():
+                yield
+        else:
+            yield
+    finally:
+        if settings.worker_enabled:
+            worker.stop()
 
 
-app = FastAPI(title="Finn", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
+api = FastAPI(title="Finn", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 
-@app.middleware("http")
+@api.middleware("http")
 async def csrf_and_headers(request: Request, call_next):
     # Mutating API calls must carry a custom header, which cross-site forms cannot set.
     if (
@@ -52,7 +60,7 @@ async def csrf_and_headers(request: Request, call_next):
     return response
 
 
-app.add_middleware(
+api.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     session_cookie="finn_session",
@@ -61,11 +69,12 @@ app.add_middleware(
     https_only=settings.secure_cookies,
 )
 
-for r in (auth.router, accounts.router, transactions.router, imports.router, receipts.router, reports.router):
-    app.include_router(r)
+for r in (auth.router, accounts.router, transactions.router, imports.router, receipts.router, reports.router,
+          tokens.router):
+    api.include_router(r)
 
 
-@app.get("/api/health")
+@api.get("/api/health")
 def health():
     with engine.connect() as conn:
         conn.execute(text("select 1"))
@@ -76,7 +85,7 @@ def health():
 static = Path(settings.static_dir)
 
 
-@app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+@api.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def spa(path: str):
     if path.startswith("api/"):
         return JSONResponse({"detail": "Not found"}, status_code=404)
@@ -93,3 +102,7 @@ def spa(path: str):
         if index.is_file():
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
     return JSONResponse({"detail": "Frontend not built"}, status_code=404)
+
+
+# ASGI entry point: /mcp goes to the MCP server, the rest to the FastAPI app
+app = MCPHost(api)
