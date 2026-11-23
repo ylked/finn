@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Bot, Check, CheckCheck, CheckSquare, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import { AccountPicker } from '../components/AccountPicker'
-import { BulkBar, StateBadge, TxSheet, txAmount, useSelection } from '../components/Tx'
+import { BulkBar, isTransfer, StateBadge, TxSheet, txAmount, useSelection } from '../components/Tx'
 import { Empty, Money, PageTitle, Segmented, Spinner, useToast } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { cents, cls, fmtDate } from '../lib/format'
@@ -103,7 +103,7 @@ export function Review() {
                     </div>
                     <div className="truncate text-xs text-slate-500">{fmtDate(tx.date, locale)} · {tx.description}</div>
                   </div>
-                  <Money value={txAmount(tx)} sign colored className="font-semibold" />
+                  <Money value={txAmount(tx)} sign={!isTransfer(tx)} colored={!isTransfer(tx)} className="font-semibold" />
                   <ChevronRight className="mt-0.5 h-4 w-4 text-slate-300" />
                 </button>
                 </div>

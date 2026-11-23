@@ -3,7 +3,7 @@ import { CheckSquare, Filter } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AccountPicker } from '../components/AccountPicker'
-import { BulkBar, TxRow, TxSheet, useSelection } from '../components/Tx'
+import { BulkBar, TxRow, TxSheet, useSelection, useTxView } from '../components/Tx'
 import { Empty, Money, PageTitle, SearchInput, Spinner } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { fmtDate } from '../lib/format'
@@ -44,6 +44,7 @@ export function Transactions() {
   const items = q.data?.pages.flatMap((p) => p.items) ?? []
   const total = q.data?.pages[0]?.total ?? 0
   const acc = accountId ? byId.get(accountId) : undefined
+  const view = useTxView(accountId)
 
   // group rows by date for readability
   const groups: [string, Transaction[]][] = []
@@ -114,9 +115,9 @@ export function Transactions() {
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {txs.map((tx) =>
                   sel.active ? (
-                    <TxRow key={tx.id} tx={tx} selected={sel.has(tx.id)} onSelect={(v) => sel.toggle(tx.id, v)} onClick={() => sel.toggle(tx.id)} />
+                    <TxRow key={tx.id} tx={tx} view={view} selected={sel.has(tx.id)} onSelect={(v) => sel.toggle(tx.id, v)} onClick={() => sel.toggle(tx.id)} />
                   ) : (
-                    <TxRow key={tx.id} tx={tx} onClick={() => setOpen(tx.id)} />
+                    <TxRow key={tx.id} tx={tx} view={view} onClick={() => setOpen(tx.id)} />
                   ),
                 )}
               </div>

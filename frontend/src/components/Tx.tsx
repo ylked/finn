@@ -15,15 +15,63 @@ import { Badge, Field, Money, Segmented, Sheet, useToast } from './ui'
 
 const PAYMENT = ['bank', 'credit_card', 'cash']
 
-export function txAmount(tx: Transaction): number {
-  const pay = tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
+/** Point of view of a list filtered on an account (with its sub-accounts): amounts are that account's movement. */
+export type TxView = { ids: Set<number>; flip: boolean }
+
+export function useTxView(accountId: number | null): TxView | undefined {
+  const { accounts, byId } = useAccounts()
+  return useMemo(() => {
+    const a = accountId ? byId.get(accountId) : undefined
+    if (!a) return undefined
+    const ids = new Set([a.id])
+    for (let grew = true; grew; ) {
+      grew = false
+      for (const x of accounts) if (x.parent_id != null && ids.has(x.parent_id) && !ids.has(x.id)) { ids.add(x.id); grew = true }
+    }
+    // a category is seen like everywhere else: spending -, income +
+    return { ids, flip: a.type === 'expense' || a.type === 'income' }
+  }, [accountId, accounts, byId])
+}
+
+const payLine = (tx: Transaction) => tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
+
+/** Money moved between two of one's own accounts (both sides on a statement or a bank/card/cash account). */
+export function isTransfer(tx: Transaction): boolean {
+  return tx.lines.length >= 2 && tx.lines.every((l) => l.bank_entry_id || PAYMENT.includes(l.account_kind ?? ''))
+}
+
+/** Lines of the entry on the viewed account, when the entry also touches other accounts. */
+function viewLines(tx: Transaction, view?: TxView) {
+  if (!view) return null
+  const own = tx.lines.filter((l) => view.ids.has(l.account_id))
+  return own.length && own.length < tx.lines.length ? own : null
+}
+
+/**
+ * Signed amount shown for an entry: + money in, - money out.
+ * In an account's list, it is that account's movement. Elsewhere, the bank/card side; a transfer between
+ * one's own accounts has no direction there and is given unsigned (see `isTransfer`).
+ */
+export function txAmount(tx: Transaction, view?: TxView): number {
+  const own = viewLines(tx, view)
+  if (own) {
+    const s = own.reduce((a, l) => a + num(l.amount), 0)
+    return view!.flip ? -s : s
+  }
+  if (isTransfer(tx)) return tx.lines.filter((l) => num(l.amount) > 0).reduce((s, l) => s + num(l.amount), 0)
+  const pay = payLine(tx)
   if (pay) return num(pay.amount)
   return tx.lines.filter((l) => num(l.amount) > 0).reduce((s, l) => s + num(l.amount), 0)
 }
 
-export function counterLabel(tx: Transaction): string {
-  const pay = tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
-  const others = tx.lines.filter((l) => l !== pay)
+export function counterLabel(tx: Transaction, view?: TxView): string {
+  const own = viewLines(tx, view)
+  if (!own && isTransfer(tx)) {
+    const names = (pos: boolean) => tx.lines.filter((l) => num(l.amount) > 0 === pos).map((l) => l.account_name).join(', ')
+    return `${names(false)} → ${names(true)}`
+  }
+  const pay = payLine(tx)
+  const others = tx.lines.filter((l) => (own ? !own.includes(l) : l !== pay))
   if (others.length === 1) return `${others[0].account_code} ${others[0].account_name}`
   return others.map((l) => l.account_code).join(' · ')
 }
@@ -36,7 +84,7 @@ export function TxIcon({ tx }: { tx: Transaction }) {
   const { byId } = useAccounts()
   const kinds = tx.lines.map((l) => l.account_kind)
   const types = tx.lines.map((l) => byId.get(l.account_id)?.type)
-  const pay = tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
+  const pay = payLine(tx)
   let Icon = (pay && kindIcons[pay.account_kind as AccountKind]) || Receipt
   let label = ''
   if (tx.source === 'opening') [Icon, label] = [Flag, t('source_opening')]
@@ -62,9 +110,10 @@ export function StateBadge({ tx }: { tx: Transaction }) {
 }
 
 /** `raw`: title with the statement name ("Migros M Dorigny") instead of the merchant, e.g. on a merchant's page. */
-export function TxRow({ tx, onClick, selected, onSelect, raw = false }: { tx: Transaction; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; raw?: boolean }) {
+export function TxRow({ tx, onClick, selected, onSelect, raw = false, view }: { tx: Transaction; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; raw?: boolean; view?: TxView }) {
   const { locale } = useI18n()
-  const amt = txAmount(tx)
+  const amt = txAmount(tx, view)
+  const neutral = !viewLines(tx, view) && isTransfer(tx)
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 md:px-4">
       {onSelect && <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />}
@@ -79,10 +128,10 @@ export function TxRow({ tx, onClick, selected, onSelect, raw = false }: { tx: Tr
             {tx.invoice && <FileText className="h-3 w-3 shrink-0" />}
             {tx.stats_hidden && <EyeOff className="h-3 w-3 shrink-0" />}
             {!tx.reconciled && tx.source === 'manual' && tx.lines.some((l) => PAYMENT.includes(l.account_kind ?? '')) && <Link2 className="h-3 w-3 shrink-0 text-amber-500" />}
-            <span className="truncate">{counterLabel(tx)}</span>
+            <span className="truncate">{counterLabel(tx, view)}</span>
           </div>
         </div>
-        <Money value={amt} sign colored className="text-sm font-medium" />
+        <Money value={amt} sign={!neutral} colored={!neutral} className="text-sm font-medium" />
       </button>
     </div>
   )
