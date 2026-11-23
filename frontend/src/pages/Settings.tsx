@@ -14,7 +14,7 @@ export function SettingsPage() {
   const qc = useQueryClient()
   const me = useMe()
   const { byId } = useAccounts()
-  const s = (me.data?.ledger.settings ?? {}) as Record<string, number | boolean>
+  const s = (me.data?.ledger.settings ?? {}) as Record<string, number | boolean | string>
   const [name, setName] = useState('')
   const [tol, setTol] = useState('7')
   const [minConf, setMinConf] = useState('0')
@@ -27,8 +27,14 @@ export function SettingsPage() {
   }, [me.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const patch = useMutation({
-    mutationFn: (body: object) => api.patch('/api/ledger', body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['me'] }); toast(t('saved')) },
+    mutationFn: (body: object) => api.patch<{ redated: number | null }>('/api/ledger', body),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['me'] })
+      if (r.redated != null) {
+        for (const k of ['transactions', 'transaction', 'accounts', 'dashboard', 'reports', 'insights']) qc.invalidateQueries({ queryKey: [k] })
+        toast(t('redated_n', { n: r.redated }))
+      } else toast(t('saved'))
+    },
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
   const rules = useQuery({ queryKey: ['rules'], queryFn: () => api.get<Rule[]>('/api/rules') })
@@ -50,6 +56,16 @@ export function SettingsPage() {
             <button className="btn-secondary" onClick={() => patch.mutate({ name })}>{t('save')}</button>
           </div>
         </Field>
+      </div>
+
+      <div className="card space-y-3 p-4">
+        <div className="font-medium">{t('bank_date')}</div>
+        <Segmented
+          value={(s.bank_date as string) === 'booking' ? 'booking' : 'value'}
+          onChange={(v) => v !== ((s.bank_date as string) === 'booking' ? 'booking' : 'value') && patch.mutate({ settings: { bank_date: v } })}
+          options={[{ value: 'value', label: t('bank_date_value') }, { value: 'booking', label: t('bank_date_booking') }]}
+        />
+        <p className="text-xs text-slate-500">{t('bank_date_help')}</p>
       </div>
 
       <div className="card space-y-3 p-4">

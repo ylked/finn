@@ -266,3 +266,26 @@ def test_bulk_account_change(client, accounts):
     assert client.post("/api/transactions/bulk-account", json={"ids": ids, "account_id": accounts["4"]["id"]}).status_code == 422
     bs = client.get("/api/reports/balance-sheet", params={"at": "2026-12-31"}).json()
     assert bs["balanced"]
+
+
+def test_bank_date_setting(client, accounts):
+    client.post("/api/imports", files=camt_files(), data={"iban_map": '{"CH690027427423101840J": "new"}'})
+    cards = client.get("/api/transactions", params={"q": "Debit card payment", "limit": 200}).json()["items"]
+    assert cards
+    # default: value date (day of the card payment), earlier than the booking date
+    tx = client.get(f"/api/transactions/{cards[0]['id']}").json()
+    be = tx["bank_entries"][0]
+    assert be["value_date"] < be["booking_date"] and tx["date"] == be["value_date"]
+    manual = client.post("/api/transactions", json={"date": "2026-01-03", "description": "cash", "lines": [
+        {"account_id": accounts["1000"]["id"], "amount": "-5"}, {"account_id": accounts["4100"]["id"], "amount": "5"}]}).json()
+
+    r = client.patch("/api/ledger", json={"settings": {"bank_date": "booking"}}).json()
+    assert r["redated"] >= len(cards)
+    assert client.get(f"/api/transactions/{tx['id']}").json()["date"] == be["booking_date"]
+    assert client.get(f"/api/transactions/{manual['id']}").json()["date"] == "2026-01-03"
+    # statement check is unaffected (bank view uses booking dates)
+    assert all(b["balance_ok"] in (True, None) for b in client.get("/api/imports").json())
+
+    client.patch("/api/ledger", json={"settings": {"bank_date": "value"}})
+    assert client.get(f"/api/transactions/{tx['id']}").json()["date"] == be["value_date"]
+    assert client.patch("/api/ledger", json={"settings": {"bank_date": "bogus"}}).status_code == 422

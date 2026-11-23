@@ -7,7 +7,7 @@ import hashlib
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..accounting import LineIn, create_transaction, get_setting, set_opening_balance, suspense_account
@@ -43,6 +43,33 @@ def sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+REDATE_SQL = """
+UPDATE transactions t SET date = sub.d, updated_at = now()
+FROM (
+    SELECT jl.transaction_id,
+           min(CASE WHEN :use_value THEN coalesce(be.value_date, be.booking_date) ELSE be.booking_date END) AS d
+    FROM journal_lines jl JOIN bank_entries be ON be.id = jl.bank_entry_id
+    WHERE jl.ledger_id = :ledger_id
+    GROUP BY jl.transaction_id
+) sub
+WHERE t.id = sub.transaction_id AND t.ledger_id = :ledger_id AND t.source IN ('bank', 'csv') AND t.date <> sub.d
+"""
+
+
+def entry_date(ledger: Ledger, be: BankEntry) -> dt.date:
+    """Date given to a transaction created from a statement line (ledger setting ``bank_date``)."""
+    if get_setting(ledger, "bank_date", "value") == "value" and be.value_date:
+        return be.value_date
+    return be.booking_date
+
+
+def redate_bank_transactions(db: Session, ledger: Ledger) -> int:
+    """Re-date transactions created from statement lines after the ``bank_date`` setting changed.
+    Manual entries that were only matched to a statement line keep their own date."""
+    use_value = get_setting(ledger, "bank_date", "value") == "value"
+    return db.execute(text(REDATE_SQL), {"use_value": use_value, "ledger_id": ledger.id}).rowcount
+
+
 def book_entry(
     db: Session, ledger: Ledger, account: Account, be: BankEntry, user_id: int | None, *, allow_match: bool = True,
     matcher: Matcher | None = None,
@@ -51,7 +78,7 @@ def book_entry(
     if allow_match and get_setting(ledger, "auto_match", True):
         tol = int(get_setting(ledger, "match_tolerance_days", 7))
         line = find_line_match(
-            db, ledger.id, account.id, be.amount, be.booking_date,
+            db, ledger.id, account.id, be.amount, entry_date(ledger, be),
             f"{be.counterparty or ''} {be.description}", tol,
         )
         if line is not None:
@@ -66,7 +93,7 @@ def book_entry(
     tx = create_transaction(
         db,
         ledger.id,
-        be.booking_date,
+        entry_date(ledger, be),
         be.description[:500] or (be.counterparty or ""),
         [
             LineIn(account.id, be.amount, None, be.orig_amount, be.orig_currency, be.id),

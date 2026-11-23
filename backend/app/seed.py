@@ -109,6 +109,8 @@ DEFAULT_SETTINGS = {
     "auto_match": True,  # match imports to manual entries / receipts
     "match_tolerance_days": 7,
     "ai_min_confidence": 0.0,  # below this, AI suggestion is stored but tx stays unclassified
+    # date of entries imported from statements: "value" (value date = day of the card payment) or "booking"
+    "bank_date": "value",
 }
 
 

@@ -5,11 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..accounting import AccountingError, balances, create_person_account, rollup, set_opening_balance
+from ..accounting import AccountingError, balances, create_person_account, get_setting, rollup, set_opening_balance
 from ..ai.classify import apply_rules_to_unclassified
 from ..auth import Ctx, ctx, writer
 from ..config import get_settings
 from ..db import get_db
+from ..importers.service import redate_bank_transactions
 from ..models import ACCOUNT_KINDS, ACCOUNT_TYPES, Account, ClassificationRule, JournalLine
 from ..schemas import AccountIn, AccountOut, AccountPatch, LedgerSettingsIn, OpeningIn, PersonIn
 
@@ -68,10 +69,16 @@ def patch_ledger(body: LedgerSettingsIn, c: Ctx = Depends(writer), db: Session =
         c.ledger.name = body.name
     if body.locale in ("fr", "en"):
         c.ledger.locale = body.locale
+    redated = None
     if body.settings is not None:
+        if body.settings.get("bank_date", "value") not in ("value", "booking"):
+            raise HTTPException(422, "bank_date must be 'value' or 'booking'")
+        before = get_setting(c.ledger, "bank_date")
         c.ledger.settings = {**(c.ledger.settings or {}), **body.settings}
+        if get_setting(c.ledger, "bank_date") != before:
+            redated = redate_bank_transactions(db, c.ledger)
     db.commit()
-    return {"ok": True, "settings": c.ledger.settings}
+    return {"ok": True, "settings": c.ledger.settings, "redated": redated}
 
 
 @router.get("/accounts", response_model=list[AccountOut])
