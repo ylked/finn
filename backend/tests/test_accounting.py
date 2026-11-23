@@ -237,7 +237,7 @@ def test_bulk_account_change(client, accounts):
 
     # counter side mode: suspense -> groceries, bank line untouched
     r = client.post("/api/transactions/bulk-account", json={"ids": ids, "account_id": a["4100"], "confirm": False}).json()
-    assert r == {"updated": len(ids), "skipped": []}
+    assert r == {"updated": len(ids), "skipped": [], "merged": 0}
     for t in client.get("/api/transactions", params={"q": "migros"}).json()["items"]:
         assert t["state"] == "auto"
         assert sorted(ln["account_code"] for ln in t["lines"]) == ["1020", "4100"]

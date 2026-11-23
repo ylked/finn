@@ -13,8 +13,9 @@ import logging
 import re
 from decimal import Decimal
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ..accounting import PAYMENT_KINDS, get_setting
 from ..config import get_settings
@@ -50,6 +51,11 @@ def apply_target(tx: Transaction, account: Account, state: str, reason: str, con
     tx.state = state
     tx.ai_reason = reason[:2000]
     tx.ai_confidence = confidence
+    from ..matching import merge_mirror
+
+    db = object_session(tx)
+    if db is not None:
+        merge_mirror(db, tx)
     return True
 
 
@@ -251,6 +257,8 @@ def apply_rules_to_unclassified(db: Session, ledger_id: int) -> int:
     for tx in db.scalars(
         select(Transaction).where(Transaction.ledger_id == ledger_id, Transaction.state == "unclassified")
     ):
+        if sa_inspect(tx).was_deleted:
+            continue  # merged into its mirror by an earlier one
         if apply_rules(db, tx):
             if tx.ai_status == "pending":
                 tx.ai_status = "done"

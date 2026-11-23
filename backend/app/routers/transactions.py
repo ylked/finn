@@ -12,6 +12,7 @@ from ..ai.classify import apply_rules_to_unclassified, split_lines
 from ..auth import Ctx, ctx, writer
 from ..db import get_db
 from ..importers.service import book_entry
+from ..matching import merge_mirror
 from ..merchants import Matcher, brief
 from ..models import Account, BankEntry, ClassificationRule, Invoice, JournalLine, Transaction
 from ..schemas import (
@@ -248,6 +249,9 @@ def update(tx_id: int, body: TransactionIn, c: Ctx = Depends(writer), db: Sessio
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
     _refresh_invoices(db, invoices)
+    db.flush()
+    db.refresh(tx, ["lines"])
+    merge_mirror(db, tx)
     text_changed = (tx.description, tx.counterparty) != (body.description, body.counterparty)
     tx.date = body.date
     tx.description = body.description
@@ -307,8 +311,10 @@ def bulk_account(body: BulkAccountIn, c: Ctx = Depends(writer), db: Session = De
         .where(Transaction.ledger_id == c.ledger.id, Transaction.id.in_(body.ids))
         .with_for_update(of=Transaction)
     ).all()
-    updated, skipped = 0, []
+    updated, skipped, merged = 0, [], set()
     for tx in txs:
+        if tx.id in merged:
+            continue
         if tx.source == "opening":
             skipped.append({"id": tx.id, "reason": "opening"})
             continue
@@ -342,9 +348,10 @@ def bulk_account(body: BulkAccountIn, c: Ctx = Depends(writer), db: Session = De
             tx.state = "auto"
         if tx.ai_status == "pending":
             tx.ai_status = "done"
+        merged.update(merge_mirror(db, tx))
         updated += 1
     db.commit()
-    return {"updated": updated, "skipped": skipped}
+    return {"updated": updated, "skipped": skipped, "merged": len(merged)}
 
 
 class StatsHiddenIn(BaseModel):
