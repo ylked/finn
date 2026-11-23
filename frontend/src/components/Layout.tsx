@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, PieChart, CheckCheck, FileUp, Home, List, LogOut, Menu, Plus, Receipt, Settings } from 'lucide-react'
+import { BarChart3, BookOpen, PieChart, CheckCheck, FileText, FileUp, Home, List, LogOut, Menu, Plus, Receipt, Settings } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -12,6 +12,7 @@ const items: { to: string; key: Key; icon: typeof Home }[] = [
   { to: '/transactions', key: 'nav_transactions', icon: List },
   { to: '/new', key: 'nav_new', icon: Plus },
   { to: '/insights', key: 'nav_insights', icon: PieChart },
+  { to: '/invoices', key: 'nav_invoices', icon: FileText },
   { to: '/imports', key: 'nav_imports', icon: FileUp },
   { to: '/receipts', key: 'nav_receipts', icon: Receipt },
   { to: '/accounts', key: 'nav_accounts', icon: BookOpen },

@@ -37,7 +37,8 @@ Money = Numeric(14, 2)
 
 ACCOUNT_TYPES = ("asset", "liability", "income", "expense")
 # kind refines the role of an account; it drives matching, UI and AI hints
-ACCOUNT_KINDS = ("bank", "credit_card", "cash", "receivable", "equity", "suspense", "other")
+# payable = bills received and not paid yet (see invoices.py)
+ACCOUNT_KINDS = ("bank", "credit_card", "cash", "receivable", "payable", "equity", "suspense", "other")
 
 
 def utcnow() -> dt.datetime:
@@ -133,6 +134,8 @@ class Transaction(TimestampMixin, Base):
     # who was paid (Migros, Netflix, ...); merchant_locked = chosen by the user, never re-detected
     merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id", ondelete="SET NULL"), index=True)
     merchant_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # left out of the insights lists (largest expenses, merchants); totals still count it
+    stats_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     merchant: Mapped[Merchant | None] = relationship()
     lines: Mapped[list[JournalLine]] = relationship(
@@ -142,7 +145,7 @@ class Transaction(TimestampMixin, Base):
 
     __table_args__ = (
         CheckConstraint("state in ('unclassified','auto','confirmed')", name="ck_tx_state"),
-        CheckConstraint("source in ('bank','csv','manual','receipt','opening')", name="ck_tx_source"),
+        CheckConstraint("source in ('bank','csv','manual','receipt','opening','invoice')", name="ck_tx_source"),
         CheckConstraint("ai_status in ('none','pending','done','failed','skipped')", name="ck_tx_ai_status"),
         Index("ix_tx_ledger_date", "ledger_id", "date"),
     )
@@ -184,10 +187,13 @@ class JournalLine(Base):
     bank_entry_id: Mapped[int | None] = mapped_column(
         ForeignKey("bank_entries.id", ondelete="SET NULL"), unique=True
     )
+    # on the payable account: this line books (credit) or settles (debit) that invoice
+    invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id", ondelete="SET NULL"), index=True)
 
     transaction: Mapped[Transaction] = relationship(back_populates="lines")
     account: Mapped[Account] = relationship()
     bank_entry: Mapped[BankEntry | None] = relationship(back_populates="line")
+    invoice: Mapped[Invoice | None] = relationship()
 
     __table_args__ = (CheckConstraint("amount <> 0", name="ck_line_nonzero"),)
 
@@ -285,6 +291,9 @@ class Receipt(TimestampMixin, Base):
     extracted: Mapped[dict | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # receipt (ticket) | invoice | payment (proof of payment) | other
+    kind: Mapped[str] = mapped_column(String(16), default="receipt", server_default="receipt")
+    invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id", ondelete="SET NULL"), index=True)
     # payment account hint chosen at upload (optional)
     payment_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
@@ -294,6 +303,46 @@ class Receipt(TimestampMixin, Base):
         CheckConstraint(
             "status in ('pending','unmatched','matched','failed','manual')", name="ck_receipt_status"
         ),
+        CheckConstraint("kind in ('receipt','invoice','payment','other')", name="ck_receipt_kind"),
+    )
+
+
+class Invoice(TimestampMixin, Base):
+    """A bill to pay. Once complete it is booked as expense / payable (``transaction``) on its issue
+    date; payments are lines on the payable account carrying ``invoice_id`` (see invoices.py)."""
+
+    __tablename__ = "invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ledger_id: Mapped[int] = mapped_column(ForeignKey("ledgers.id", ondelete="CASCADE"), index=True)
+    # draft (being read / incomplete, not booked) | open | paid
+    status: Mapped[str] = mapped_column(String(16), default="draft", server_default="draft")
+    issuer: Mapped[str | None] = mapped_column(String(255))
+    merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id", ondelete="SET NULL"))
+    number: Mapped[str | None] = mapped_column(String(100))
+    # payment reference of the QR-bill / BVR, used to recognise the payment in statements
+    reference: Mapped[str | None] = mapped_column(String(64))
+    iban: Mapped[str | None] = mapped_column(String(34))
+    issue_date: Mapped[dt.date | None] = mapped_column(Date)
+    due_date: Mapped[dt.date | None] = mapped_column(Date)
+    amount: Mapped[Decimal | None] = mapped_column(Money)
+    currency: Mapped[str] = mapped_column(String(3), default="CHF", server_default="CHF")
+    # expense category
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
+    description: Mapped[str | None] = mapped_column(Text)
+    transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id", ondelete="SET NULL"),
+                                                       index=True)
+    paid_date: Mapped[dt.date | None] = mapped_column(Date)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    merchant: Mapped[Merchant | None] = relationship()
+    account: Mapped[Account | None] = relationship()
+    transaction: Mapped[Transaction | None] = relationship()
+    documents: Mapped[list[Receipt]] = relationship(order_by="Receipt.id")
+
+    __table_args__ = (
+        CheckConstraint("status in ('draft','open','paid')", name="ck_invoice_status"),
+        Index("ix_invoice_ledger_status", "ledger_id", "status", "due_date"),
     )
 
 

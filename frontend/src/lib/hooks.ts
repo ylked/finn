@@ -17,7 +17,7 @@ export function useAccounts() {
 export function useRefreshLedger() {
   const qc = useQueryClient()
   return () => {
-    for (const k of ['transactions', 'transaction', 'accounts', 'dashboard', 'stats', 'reports', 'imports', 'receipts', 'unbooked', 'receivables'])
+    for (const k of ['transactions', 'transaction', 'accounts', 'dashboard', 'stats', 'reports', 'imports', 'receipts', 'unbooked', 'receivables', 'invoices', 'insights'])
       qc.invalidateQueries({ queryKey: [k] })
   }
 }

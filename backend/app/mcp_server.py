@@ -377,6 +377,27 @@ def build_server() -> MCPServer:
             return _jsonable(insights.merchant(merchant_id, start, end, c, db))
 
     @mcp.tool(annotations=READ)
+    def balance_history(start: Date | None = None, end: Date | None = None, scope: str = "liquid") -> dict:
+        """Balance over time and a 6-month projection. scope: "liquid" (bank, cash, cards), "net_worth",
+        or an account id. The projection continues the median monthly change and subtracts open invoices."""
+        from .routers import insights
+
+        with _Call() as (db, c):
+            return _jsonable(insights.balance(start, end, scope, c, db))
+
+    @mcp.tool(annotations=READ)
+    def invoices(status: str | None = "open,draft") -> list[dict]:
+        """Invoices (bills to pay): issuer, amount, due date, remaining, overdue, linked payments.
+        status: comma separated among draft (being read / incomplete), open, paid; empty for all."""
+        from .routers import invoices as inv_api
+
+        with _Call() as (db, c):
+            out = inv_api.list_invoices(status or None, c, db)
+            for x in out:
+                x.pop("documents", None)
+            return _jsonable(out)
+
+    @mcp.tool(annotations=READ)
     def account_ledger(account_code: str, start: Date, end: Date) -> dict:
         """General ledger (grand livre) of one account: opening balance, movements with running balance, closing."""
         with _Call() as (db, c):

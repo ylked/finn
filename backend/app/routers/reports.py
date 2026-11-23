@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from ..accounting import balances, natural
 from ..auth import Ctx, ctx
 from ..db import get_db
-from ..models import Account, Transaction
+from ..models import Account, Receipt, Transaction
 from ..reports import service
+from .invoices import invoice_summary
 from ..reports.render import LABELS, csv_bytes, fmt_date, pdf
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -166,4 +167,13 @@ def dashboard(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
         "to_review": counts.get("auto", 0),
         "unclassified": counts.get("unclassified", 0),
         "net_worth": bs["net_worth"],
+        "liquid": sum((raw.get(a.id, zero) for a in accounts if a.kind in ("bank", "cash", "credit_card")), zero),
+        "invoices": invoice_summary(db, c.ledger.id),
+        "receipts": dict(db.execute(
+            select(Receipt.status, func.count())
+            .where(Receipt.ledger_id == c.ledger.id, Receipt.invoice_id.is_(None),
+                   Receipt.status.in_(["pending", "unmatched", "failed", "manual"]))
+            .group_by(Receipt.status)).all()),
+        "ai_pending": db.scalar(select(func.count()).where(Transaction.ledger_id == c.ledger.id,
+                                                           Transaction.ai_status == "pending")),
     }

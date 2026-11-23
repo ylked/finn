@@ -1,4 +1,4 @@
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Search } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cls, money, num } from '../lib/format'
@@ -178,6 +178,81 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
           className={cls('flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition md:flex-none', value === o.value ? 'bg-white shadow-sm dark:bg-slate-950' : 'text-slate-500')}
         >
           {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Search box with a one-click clear button. Works controlled (value) or uncontrolled (defaultValue). */
+export function SearchInput({ value, defaultValue, onChange, onEnter, placeholder, autoFocus, className = '' }: { value?: string; defaultValue?: string; onChange: (v: string) => void; onEnter?: () => void; placeholder?: string; autoFocus?: boolean; className?: string }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const [hasText, setHasText] = useState(!!(value ?? defaultValue))
+  const shown = value !== undefined ? !!value : hasText
+  return (
+    <div className={cls('relative', className)}>
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <input
+        ref={ref}
+        type="text"
+        enterKeyHint="search"
+        className="input pl-9 pr-9"
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        value={value}
+        defaultValue={value === undefined ? defaultValue : undefined}
+        onChange={(e) => {
+          setHasText(!!e.target.value)
+          onChange(e.target.value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onEnter?.()
+          if (e.key === 'Escape' && shown) {
+            e.stopPropagation()
+            if (ref.current) ref.current.value = ''
+            setHasText(false)
+            onChange('')
+          }
+        }}
+      />
+      {shown && (
+        <button
+          type="button"
+          aria-label="clear"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+          onClick={() => {
+            if (ref.current) ref.current.value = ''
+            setHasText(false)
+            onChange('')
+            ref.current?.focus()
+          }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Horizontal filter chips (scrolls on phones). */
+export function Chips<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; count?: number }[] }) {
+  return (
+    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          aria-pressed={value === o.value}
+          className={cls(
+            'inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ring-1 transition',
+            value === o.value
+              ? 'bg-brand-700 text-white ring-brand-700 dark:bg-brand-500 dark:text-slate-950 dark:ring-brand-500'
+              : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700 dark:hover:bg-slate-800',
+          )}
+        >
+          {o.label}
+          {o.count != null && <span className={cls('tnum text-xs', value === o.value ? 'opacity-80' : 'text-slate-400')}>{o.count}</span>}
         </button>
       ))}
     </div>

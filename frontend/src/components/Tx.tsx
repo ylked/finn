@@ -1,13 +1,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowRightLeft, Banknote, Bot, CircleHelp, CreditCard, Flag, Landmark, Receipt, Store, User, Wallet, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRightLeft, Banknote, Bot, CircleHelp, CreditCard, EyeOff, FileText, Flag, Landmark, Receipt, Store, User, Wallet, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cents, cls, fmtDate, money, num, parseAmount } from '../lib/format'
 import { accountLabel, useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
-import type { Account, AccountKind, BankEntry, Transaction } from '../lib/types'
+import type { Account, AccountKind, BankEntry, DocKind, Transaction } from '../lib/types'
 import { AccountPicker } from './AccountPicker'
+import { DocList } from './Docs'
+import { TxInvoice } from './Invoice'
 import { MerchantLogo, MerchantPicker, TxMerchant, useRefreshMerchants } from './Merchant'
 import { Badge, Field, Money, Segmented, Sheet, useToast } from './ui'
 
@@ -38,6 +40,7 @@ export function TxIcon({ tx }: { tx: Transaction }) {
   let Icon = (pay && kindIcons[pay.account_kind as AccountKind]) || Receipt
   let label = ''
   if (tx.source === 'opening') [Icon, label] = [Flag, t('source_opening')]
+  else if (tx.invoice || tx.source === 'invoice') [Icon, label] = [FileText, t('invoice')]
   else if (kinds.includes('receivable')) [Icon, label] = [User, t('person')]
   else if (kinds.includes('suspense')) [Icon, label] = [CircleHelp, t('state_unclassified')]
   else if (types.includes('income')) [Icon, label] = [Banknote, t('income')]
@@ -73,6 +76,8 @@ export function TxRow({ tx, onClick, selected, onSelect, raw = false }: { tx: Tr
           <div className="flex items-center gap-1.5 truncate text-xs text-slate-500">
             <StateBadge tx={tx} />
             {tx.receipts.length > 0 && <Paperclip className="h-3 w-3 shrink-0" />}
+            {tx.invoice && <FileText className="h-3 w-3 shrink-0" />}
+            {tx.stats_hidden && <EyeOff className="h-3 w-3 shrink-0" />}
             {!tx.reconciled && tx.source === 'manual' && tx.lines.some((l) => PAYMENT.includes(l.account_kind ?? '')) && <Link2 className="h-3 w-3 shrink-0 text-amber-500" />}
             <span className="truncate">{counterLabel(tx)}</span>
           </div>
@@ -117,7 +122,6 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
   const [notes, setNotes] = useState(tx.notes ?? '')
   const [lines, setLines] = useState<EditLine[]>(() => toEdit(tx))
   const [sheet, setSheet] = useState<null | 'person' | 'rule' | 'match'>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setDate(tx.date)
@@ -179,19 +183,19 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
 
-  const upload = useMutation({
-    mutationFn: (files: FileList) => {
-      const fd = new FormData()
-      Array.from(files).forEach((f) => fd.append('files', f))
-      fd.append('transaction_id', String(tx.id))
-      return api.post('/api/receipts', fd)
-    },
-    onSuccess: () => {
-      refresh()
-      onDone?.(tx)
-    },
+  const uploadDocs = (files: FileList, kind: DocKind) => {
+    const fd = new FormData()
+    Array.from(files).forEach((f) => fd.append('files', f))
+    fd.append('transaction_id', String(tx.id))
+    fd.append('kind', kind)
+    return api.post('/api/receipts', fd)
+  }
+  const hide = useMutation({
+    mutationFn: (hidden: boolean) => api.post('/api/transactions/stats-hidden', { ids: [tx.id], hidden }),
+    onSuccess: (_, hidden) => { toast(hidden ? t('stats_hidden_on') : t('stats_hidden_off')); refresh() },
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
+  const isExpense = tx.lines.some((l) => byId.get(l.account_id)?.type === 'expense' && num(l.amount) > 0)
 
   const bankEntries = tx.bank_entries ?? []
 
@@ -349,21 +353,17 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
         </div>
       )}
 
-      {/* receipts */}
+      {/* invoice this entry records or pays */}
+      {!compact && <TxInvoice tx={tx} onChanged={refresh} />}
+
+      {/* documents: receipt, invoice, proof of payment... */}
       {!compact && (
-        <div className="flex flex-wrap items-center gap-2">
-          {tx.receipts.map((r) => (
-            <a key={r.id} href={`/api/receipts/${r.id}/file`} target="_blank" rel="noreferrer" className="btn-secondary text-xs">
-              <Paperclip className="h-3.5 w-3.5" /> {r.filename}
-            </a>
-          ))}
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => e.target.files?.length && upload.mutate(e.target.files)} />
-          <button className="btn-ghost text-xs" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
-            <Paperclip className="h-3.5 w-3.5" /> {t('attach_receipt')}
-          </button>
+        <div>
+          <div className="label">{t('documents')}</div>
+          <DocList docs={tx.receipts} upload={uploadDocs} onChanged={refresh} />
           {!tx.reconciled && tx.source === 'manual' && payLine && (
-            <button className="btn-ghost text-xs" onClick={() => setSheet('match')}>
-              <Link2 className="h-3.5 w-3.5" /> {t('find_statement')}
+            <button className="btn-ghost text-sm" onClick={() => setSheet('match')}>
+              <Link2 className="h-4 w-4" /> {t('find_statement')}
             </button>
           )}
         </div>
@@ -375,6 +375,11 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
           {payLine && (tx.source === 'bank' || tx.source === 'csv') && (
             <button className="btn-ghost text-sm" onClick={() => action.mutate('reclassify')} disabled={action.isPending}>
               <Bot className="h-4 w-4" /> {t('reclassify_ai')}
+            </button>
+          )}
+          {isExpense && (
+            <button className="btn-ghost text-sm" title={t('stats_hidden_help')} onClick={() => hide.mutate(!tx.stats_hidden)} disabled={hide.isPending}>
+              <EyeOff className="h-4 w-4" /> {tx.stats_hidden ? t('stats_show') : t('stats_hide')}
             </button>
           )}
           {!tx.lines.some((l) => l.bank_entry_id) && (
@@ -598,6 +603,16 @@ export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
     },
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
+  const refreshLedger = useRefreshLedger()
+  const hideMany = useMutation({
+    mutationFn: () => api.post<{ updated: number }>('/api/transactions/stats-hidden', { ids: [...sel.ids], hidden: true }),
+    onSuccess: (r) => {
+      refreshLedger()
+      toast(t('bulk_hidden', { n: r.updated }))
+      sel.stop()
+    },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
   if (!sel.active) return null
   const all = allIds.length > 0 && allIds.every((id) => sel.ids.has(id))
   return (
@@ -610,6 +625,9 @@ export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
           </button>
           <button className="btn-secondary px-3 text-slate-900" aria-label={t('merchant')} title={t('merchant')} disabled={!sel.ids.size} onClick={() => setPickMerchant(true)}>
             <Store className="h-4 w-4" />
+          </button>
+          <button className="btn-secondary px-3 text-slate-900" aria-label={t('stats_hide')} title={t('stats_hidden_help')} disabled={!sel.ids.size || hideMany.isPending} onClick={() => hideMany.mutate()}>
+            <EyeOff className="h-4 w-4" />
           </button>
           <button className="btn-primary px-3" aria-label={t('bulk_move')} disabled={!sel.ids.size} onClick={() => setMoving(true)}>
             <ArrowRightLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t('bulk_move')}</span>

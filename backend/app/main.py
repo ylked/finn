@@ -11,7 +11,7 @@ from . import auth
 from .config import get_settings
 from .db import engine
 from .mcp_server import MCPHost
-from .routers import accounts, imports, insights, merchants, receipts, reports, tokens, transactions
+from .routers import accounts, imports, insights, invoices, merchants, receipts, reports, tokens, transactions
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -70,7 +70,7 @@ api.add_middleware(
 )
 
 for r in (auth.router, accounts.router, merchants.router, transactions.router, imports.router, receipts.router,
-          reports.router, insights.router, tokens.router):
+          reports.router, insights.router, invoices.router, tokens.router):
     api.include_router(r)
 
 

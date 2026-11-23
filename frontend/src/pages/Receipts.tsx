@@ -1,17 +1,22 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Camera, ExternalLink, FileText, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Camera, ExternalLink, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { AccountPicker } from '../components/AccountPicker'
 import { TxRow } from '../components/Tx'
-import { Badge, Empty, Field, Money, PageTitle, Sheet, Spinner, useToast } from '../components/ui'
-import { api } from '../lib/api'
+import { DOC_KINDS, DocThumb } from '../components/Docs'
+import { Badge, Chips, Empty, Field, Money, PageTitle, Sheet, Spinner, useToast } from '../components/ui'
+import { api, qs } from '../lib/api'
 import { fmtDate } from '../lib/format'
 import { useAccounts, useMe, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
-import type { Receipt, Transaction } from '../lib/types'
+import type { DocKind, Receipt, Transaction } from '../lib/types'
 
 const statusColor = { pending: 'violet', unmatched: 'amber', matched: 'green', failed: 'red', manual: 'gray' } as const
+const FILTERS = ['all', 'todo', 'pending', 'unmatched', 'manual', 'failed', 'matched'] as const
+type Filter = (typeof FILTERS)[number]
+// "to handle" = everything that needs the user: no match found, data to enter, reading failed
+const TODO = ['unmatched', 'manual', 'failed']
 
 export function Receipts() {
   const { t, locale } = useI18n()
@@ -22,11 +27,22 @@ export function Receipts() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [payment, setPayment] = useState<number | null>(null)
   const [open, setOpen] = useState<number | null>(null)
-  const q = useQuery({
-    queryKey: ['receipts'],
-    queryFn: () => api.get<Receipt[]>('/api/receipts'),
-    refetchInterval: (q) => (q.state.data?.some((r) => r.status === 'pending') ? 3000 : false),
+  const [sp, setSp] = useSearchParams()
+  const filter = (sp.get('status') as Filter) || 'all'
+  const statuses = filter === 'all' ? undefined : filter === 'todo' ? TODO.join(',') : filter
+  const counts = useQuery({
+    queryKey: ['receipts', 'counts'],
+    queryFn: () => api.get<Record<string, number>>('/api/receipts/counts'),
+    refetchInterval: (q) => (q.state.data?.pending ? 3000 : false),
   })
+  const q = useQuery({
+    queryKey: ['receipts', 'list', statuses],
+    queryFn: () => api.get<Receipt[]>(`/api/receipts${qs({ status: statuses, limit: 1000 })}`),
+    refetchInterval: (q) => (q.state.data?.some((r) => r.status === 'pending') || counts.data?.pending ? 3000 : false),
+  })
+  const c = counts.data ?? {}
+  const total = Object.values(c).reduce((a, b) => a + b, 0)
+  const countOf = (f: Filter) => (f === 'all' ? total : f === 'todo' ? TODO.reduce((a, k) => a + (c[k] ?? 0), 0) : c[f] ?? 0)
   const upload = useMutation({
     mutationFn: (files: FileList) => {
       const fd = new FormData()
@@ -66,6 +82,12 @@ export function Receipts() {
         </div>
       </div>
 
+      <Chips
+        value={filter}
+        onChange={(v) => { const n = new URLSearchParams(sp); if (v === 'all') n.delete('status'); else n.set('status', v); setSp(n, { replace: true }) }}
+        options={FILTERS.filter((f) => f === 'all' || f === filter || countOf(f) > 0).map((f) => ({ value: f, label: t(f === 'all' ? 'all' : f === 'todo' ? 'receipts_todo' : `status_${f}`), count: countOf(f) }))}
+      />
+
       {q.isLoading ? (
         <Spinner />
       ) : !q.data?.length ? (
@@ -74,11 +96,12 @@ export function Receipts() {
         <div className="card divide-y divide-slate-100 overflow-hidden dark:divide-slate-800">
           {q.data.map((r) => (
             <button key={r.id} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => setOpen(r.id)}>
-              <Thumb r={r} />
+              <DocThumb d={r} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{r.extracted?.merchant || r.filename}</div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Badge color={statusColor[r.status]}>{t(`status_${r.status}`)}</Badge>
+                  {r.kind !== 'receipt' && <Badge>{t(`doc_${r.kind}`)}</Badge>}
                   {r.extracted?.date && fmtDate(r.extracted.date, locale)}
                 </div>
               </div>
@@ -92,11 +115,6 @@ export function Receipts() {
   )
 }
 
-function Thumb({ r }: { r: Receipt }) {
-  if (r.mime_type.startsWith('image/') && r.mime_type !== 'image/heic' && r.mime_type !== 'image/heif')
-    return <img src={`/api/receipts/${r.id}/file`} className="h-10 w-10 shrink-0 rounded-lg object-cover" loading="lazy" alt="" />
-  return <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800"><FileText className="h-5 w-5 text-slate-400" /></div>
-}
 
 function ReceiptSheet({ id, onClose }: { id: number; onClose: () => void }) {
   const { t } = useI18n()
@@ -127,6 +145,7 @@ function ReceiptSheet({ id, onClose }: { id: number; onClose: () => void }) {
     retry: useMutation({ mutationFn: () => api.post(`/api/receipts/${id}/retry`), onSuccess: done, onError: err }),
     create: useMutation({ mutationFn: () => api.post<Transaction>(`/api/receipts/${id}/transaction`, { payment_account_id: payment }), onSuccess: done, onError: err }),
     del: useMutation({ mutationFn: () => api.del(`/api/receipts/${id}`), onSuccess: () => { refresh(); onClose() }, onError: err }),
+    kind: useMutation({ mutationFn: (kind: DocKind) => api.put(`/api/receipts/${id}/kind`, { kind }), onSuccess: done, onError: err }),
   }
   const codeName = (c: string) => accounts.find((a) => a.code === c)?.name ?? c
 
@@ -147,6 +166,9 @@ function ReceiptSheet({ id, onClose }: { id: number; onClose: () => void }) {
             <div className="flex items-center gap-2">
               <Badge color={statusColor[r.status]}>{t(`status_${r.status}`)}</Badge>
               {r.status === 'pending' && <Spinner className="h-4 w-4" />}
+              <select className="ml-auto rounded-lg border-0 bg-slate-100 py-1 pl-2 pr-7 text-xs dark:bg-slate-800" value={r.kind} aria-label={t('doc_kind')} onChange={(e) => m.kind.mutate(e.target.value as DocKind)}>
+                {DOC_KINDS.map((k) => <option key={k} value={k}>{t(`doc_${k}`)}</option>)}
+              </select>
             </div>
             {r.error && <div className="text-xs text-red-600">{r.error}</div>}
             <div className="grid grid-cols-2 gap-2">

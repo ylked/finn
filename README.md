@@ -126,6 +126,24 @@ to recognise similar entries), in bulk from a selection, or on the merchant's pa
 for the logo, recognised texts, own logo, merge, delete). Manual choices are never overwritten.
 Logos are fetched by the server and cached; see `MERCHANT_LOGOS` in `.env.example`.
 
+Entries (or whole categories, e.g. rent) can be **hidden from the lists** (largest expenses,
+merchants); totals still count them. The **balance chart** shows liquid money, net worth or one
+account over the period, with a 6-month projection: the median monthly change of the last 6 complete
+months (invoice payments left out) minus open invoices on their due dates.
+
+## Invoices
+
+*Factures* keeps the bills to pay. Upload a PDF or photo (or enter one by hand): the vision model
+reads issuer, amount, invoice date, due date, QR reference / IBAN and category. Once the amount is
+known the invoice is booked on its date as `expense +amount / 2000 Factures à payer -amount` (kind
+`payable`), so the expense counts in the month the bill arrived and the debt shows in net worth.
+Payments settle it: on import, a statement line paying an open invoice (same QR reference, same
+creditor IBAN, or same amount and a matching name) is booked against the payable account instead
+of being classified; an already imported payment is linked when the invoice is recorded. Payments
+can also be linked by hand (from the invoice or from the entry), or recorded with *Marquer payée*
+(the bank line reconciles with it later). Several documents can be attached to an invoice or an
+entry (invoice, proof of payment, receipt...).
+
 ## How the accounting works
 
 | Concept | Implementation |

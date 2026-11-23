@@ -94,6 +94,18 @@ class LineOut(ORM):
     orig_amount: Decimal | None
     orig_currency: str | None
     bank_entry_id: int | None
+    invoice_id: int | None = None
+
+
+class InvoiceBrief(BaseModel):
+    id: int
+    issuer: str | None
+    number: str | None
+    status: str
+    due_date: dt.date | None
+    amount: Decimal | None
+    # booking: this transaction records the invoice; payment: it pays it
+    role: str
 
 
 class ReceiptBrief(ORM):
@@ -101,6 +113,7 @@ class ReceiptBrief(ORM):
     filename: str
     mime_type: str
     status: str
+    kind: str = "receipt"
 
 
 class MerchantBrief(BaseModel):
@@ -125,6 +138,8 @@ class TransactionOut(ORM):
     reconciled: bool = False
     merchant: MerchantBrief | None = None
     merchant_locked: bool = False
+    stats_hidden: bool = False
+    invoice: InvoiceBrief | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -217,6 +232,8 @@ class ReceiptOut(ORM):
     extracted: dict | None
     error: str | None
     payment_account_id: int | None
+    kind: str = "receipt"
+    invoice_id: int | None = None
     created_at: dt.datetime
 
 

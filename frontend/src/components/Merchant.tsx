@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, ImageUp, Merge, Plus, RotateCcw, Search, Store, Trash2, Wand2 } from 'lucide-react'
+import { Check, ImageUp, Merge, Plus, RotateCcw, Store, Trash2, Wand2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -7,7 +7,7 @@ import { cls, fold } from '../lib/format'
 import { useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { Merchant, MerchantBrief, Transaction } from '../lib/types'
-import { Field, Money, Sheet, useToast } from './ui'
+import { Field, Money, SearchInput, Sheet, useToast } from './ui'
 
 const sizes = { sm: 'h-8 w-8 text-[11px] rounded-lg', md: 'h-10 w-10 text-xs rounded-xl', lg: 'h-16 w-16 text-lg rounded-2xl' }
 
@@ -85,10 +85,7 @@ export function MerchantPicker({ open, onClose, onPick, title, exclude, allowNon
   return (
     <Sheet open={open} onClose={onClose} title={title ?? t('merchant_choose')} tall>
       <div className="sticky -top-4 z-10 -mx-4 -mt-4 mb-3 bg-white px-4 pb-3 pt-4 dark:bg-slate-900">
-        <div className="relative">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <input className="input pl-9" autoFocus placeholder={t('merchant_search')} value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        <SearchInput autoFocus placeholder={t('merchant_search')} value={q} onChange={setQ} />
       </div>
       {footer}
       <div className="divide-y divide-slate-100 dark:divide-slate-800">

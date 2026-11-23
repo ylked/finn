@@ -13,9 +13,10 @@ from ..auth import Ctx, ctx, writer
 from ..db import get_db
 from ..importers.service import book_entry
 from ..merchants import Matcher, brief
-from ..models import Account, BankEntry, ClassificationRule, JournalLine, Transaction
+from ..models import Account, BankEntry, ClassificationRule, Invoice, JournalLine, Transaction
 from ..schemas import (
     BankEntryOut,
+    InvoiceBrief,
     LineOut,
     ReceiptBrief,
     RuleIn,
@@ -58,9 +59,16 @@ def to_out(tx: Transaction, cls=TransactionOut):
             orig_amount=ln.orig_amount,
             orig_currency=ln.orig_currency,
             bank_entry_id=ln.bank_entry_id,
+            invoice_id=ln.invoice_id,
         )
         for ln in tx.lines
     ]
+    inv_line = next((ln for ln in tx.lines if ln.invoice_id), None)
+    invoice = None
+    if inv_line is not None and inv_line.invoice is not None:
+        i = inv_line.invoice
+        invoice = InvoiceBrief(id=i.id, issuer=i.issuer, number=i.number, status=i.status, due_date=i.due_date,
+                               amount=i.amount, role="booking" if i.transaction_id == tx.id else "payment")
     pay = [ln for ln in tx.lines if ln.account.kind in acc_svc.PAYMENT_KINDS]
     data = dict(
         id=tx.id,
@@ -78,6 +86,8 @@ def to_out(tx: Transaction, cls=TransactionOut):
         reconciled=bool(pay) and all(ln.bank_entry_id for ln in pay),
         merchant=brief(tx.merchant),
         merchant_locked=tx.merchant_locked,
+        stats_hidden=tx.stats_hidden,
+        invoice=invoice,
         created_at=tx.created_at,
         updated_at=tx.updated_at,
     )
@@ -97,6 +107,7 @@ def list_transactions(
     unreconciled: bool = False,
     amount: Decimal | None = None,
     merchant_id: int | None = None,
+    stats_hidden: bool | None = None,
     limit: int = Query(50, le=500),
     offset: int = 0,
     c: Ctx = Depends(ctx),
@@ -112,6 +123,8 @@ def list_transactions(
         stmt = stmt.where(Transaction.state.in_(state))
     if merchant_id:
         stmt = stmt.where(Transaction.merchant_id == merchant_id)
+    if stats_hidden is not None:
+        stmt = stmt.where(Transaction.stats_hidden.is_(stats_hidden))
     if source:
         stmt = stmt.where(Transaction.source == source)
     if date_from:
@@ -229,10 +242,12 @@ def update(tx_id: int, body: TransactionIn, c: Ctx = Depends(writer), db: Sessio
         new = incoming[be_id]
         if new.account_id != ln.account_id or acc_svc.q(new.amount) != ln.amount:
             raise HTTPException(422, "Account and amount of statement lines cannot be changed")
+    invoices = {ln.invoice_id for ln in tx.lines if ln.invoice_id}
     try:
         acc_svc.set_lines(db, tx, _lines(body))
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
+    _refresh_invoices(db, invoices)
     text_changed = (tx.description, tx.counterparty) != (body.description, body.counterparty)
     tx.date = body.date
     tx.description = body.description
@@ -332,6 +347,23 @@ def bulk_account(body: BulkAccountIn, c: Ctx = Depends(writer), db: Session = De
     return {"updated": updated, "skipped": skipped}
 
 
+class StatsHiddenIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=1000)
+    hidden: bool = True
+
+
+@router.post("/transactions/stats-hidden")
+def set_stats_hidden(body: StatsHiddenIn, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
+    """Hide entries from the insights lists (largest expenses, merchants); totals keep counting them."""
+    txs = db.scalars(select(Transaction).where(Transaction.ledger_id == c.ledger.id, Transaction.id.in_(body.ids)))
+    n = 0
+    for tx in txs:
+        tx.stats_hidden = body.hidden
+        n += 1
+    db.commit()
+    return {"updated": n}
+
+
 @router.post("/transactions/{tx_id}/reclassify", response_model=TransactionDetail)
 def reclassify(tx_id: int, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
     """Put the counter side back on suspense and queue the AI again."""
@@ -364,9 +396,21 @@ def delete(tx_id: int, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
     for r in tx.receipts:
         r.transaction_id = None
         r.status = "unmatched" if r.extracted else "manual"
+    invoices = {ln.invoice_id for ln in tx.lines if ln.invoice_id}
+    for inv in db.scalars(select(Invoice).where(Invoice.transaction_id == tx.id)):
+        inv.transaction_id = None  # deleting the booking turns the invoice back into a draft
     db.delete(tx)
+    db.flush()
+    _refresh_invoices(db, invoices)
     db.commit()
     return {"ok": True}
+
+
+def _refresh_invoices(db: Session, ids: set[int]) -> None:
+    from ..invoices import refresh
+
+    for inv in db.scalars(select(Invoice).where(Invoice.id.in_(ids or {0}))):
+        refresh(db, inv)
 
 
 @router.post("/transactions/{tx_id}/lines/{line_id}/unlink", response_model=TransactionDetail)

@@ -1,13 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, List, Sparkles, Store } from 'lucide-react'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Eye, EyeOff, List, Sparkles, Store } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { MerchantLogo, MerchantRow } from '../components/Merchant'
 import { TxSheet } from '../components/Tx'
-import { Money, PageTitle, Segmented, Spinner } from '../components/ui'
+import { Money, PageTitle, Segmented, Sheet, Spinner, useToast } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { cls, fmtDate, money, num, today } from '../lib/format'
+import { useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { MerchantBrief } from '../lib/types'
 
@@ -227,7 +228,8 @@ interface Overview {
   categories: Cat[]
   merchants: (MerchantBrief & { amount: number; count: number })[]
   weekday: { day: number; amount: number; count: number }[]
-  largest: { id: number; date: string; label: string; amount: number; merchant: MerchantBrief | null }[]
+  largest: { id: number; date: string; label: string; amount: number; merchant: MerchantBrief | null; account: { id: number; code: string; name: string } }[]
+  hidden: { count: number; amount: number; accounts: { id: number; code: string; name: string }[] }
 }
 
 export function Insights() {
@@ -238,6 +240,8 @@ export function Insights() {
   const [selected, setSelected] = useState<number | null>(null)
   const [allMerchants, setAllMerchants] = useState(false)
   const [openTx, setOpenTx] = useState<number | null>(null)
+  const [hiding, setHiding] = useState<Largest | null>(null)
+  const [showHidden, setShowHidden] = useState(false)
   const q = useQuery({ queryKey: ['insights', p.start, p.end], queryFn: () => api.get<Overview>(`/api/insights${qs({ start: p.start, end: p.end })}`) })
   const d = q.data
   useEffect(() => setSelected(null), [level])
@@ -284,6 +288,8 @@ export function Insights() {
               <ArrowRight className="h-4 w-4" />
             </Link>
           )}
+
+          <BalanceCard start={p.start} end={p.end} forecastable={p.offset === 0} />
 
           <div className="grid gap-4 lg:grid-cols-2">
             {/* where the money goes */}
@@ -375,22 +381,246 @@ export function Insights() {
               <h2 className="mb-2 text-sm font-semibold">{t('largest_expenses')}</h2>
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
                 {d.largest.map((x) => (
-                  <button key={x.id} className="flex w-full items-center gap-3 py-2 text-left" onClick={() => setOpenTx(x.id)}>
-                    <MerchantLogo m={x.merchant} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{x.merchant?.name || x.label}</div>
-                      <div className="text-xs text-slate-500">{fmtDate(x.date, locale)}</div>
-                    </div>
-                    <Money value={x.amount} className="text-sm font-medium" />
-                  </button>
+                  <div key={x.id} className="flex items-center gap-1">
+                    <button className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left" onClick={() => setOpenTx(x.id)}>
+                      <MerchantLogo m={x.merchant} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{x.merchant?.name || x.label}</div>
+                        <div className="truncate text-xs text-slate-500">{fmtDate(x.date, locale)} · {x.account.name}</div>
+                      </div>
+                      <Money value={x.amount} className="text-sm font-medium" />
+                    </button>
+                    <button className="btn-ghost shrink-0 p-2 text-slate-400" title={t('stats_hide')} aria-label={t('stats_hide')} onClick={() => setHiding(x)}>
+                      <EyeOff className="h-4 w-4" />
+                    </button>
+                  </div>
                 ))}
                 {!d.largest.length && <p className="py-6 text-center text-sm text-slate-400">{t('no_spending')}</p>}
               </div>
+              {(d.hidden.count > 0 || d.hidden.accounts.length > 0) && (
+                <button className="mt-2 flex w-full items-center gap-2 text-left text-xs text-slate-500 hover:underline" onClick={() => setShowHidden(true)}>
+                  <EyeOff className="h-3.5 w-3.5 shrink-0" />
+                  {t('hidden_summary', { n: d.hidden.count, v: money(d.hidden.amount) })}
+                </button>
+              )}
             </div>
           </div>
         </>
       )}
       <TxSheet id={openTx} onClose={() => setOpenTx(null)} />
+      {hiding && <HideSheet x={hiding} onClose={() => setHiding(null)} />}
+      {showHidden && d && <HiddenSheet hidden={d.hidden} start={d.period.start} end={d.period.end} onClose={() => setShowHidden(false)} />}
+    </div>
+  )
+}
+
+type Largest = Overview['largest'][number]
+
+function HideSheet({ x, onClose }: { x: Largest; onClose: () => void }) {
+  const { t } = useI18n()
+  const toast = useToast()
+  const refresh = useRefreshLedger()
+  const hide = useMutation({
+    mutationFn: (what: 'tx' | 'account') =>
+      what === 'tx'
+        ? api.post('/api/transactions/stats-hidden', { ids: [x.id], hidden: true })
+        : api.post('/api/insights/hidden-accounts', { account_id: x.account.id, hidden: true }),
+    onSuccess: () => { toast(t('stats_hidden_on')); refresh(); onClose() },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
+  return (
+    <Sheet open onClose={onClose} title={t('stats_hide')}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-500">{t('stats_hidden_help')}</p>
+        <button className="btn-secondary w-full justify-start" onClick={() => hide.mutate('tx')}>
+          <EyeOff className="h-4 w-4" /> {t('hide_this_entry', { name: x.merchant?.name || x.label })}
+        </button>
+        <button className="btn-secondary w-full justify-start" onClick={() => hide.mutate('account')}>
+          <EyeOff className="h-4 w-4" /> {t('hide_category', { name: x.account.name })}
+        </button>
+      </div>
+    </Sheet>
+  )
+}
+
+function HiddenSheet({ hidden, start, end, onClose }: { hidden: Overview['hidden']; start: string; end: string; onClose: () => void }) {
+  const { t } = useI18n()
+  const toast = useToast()
+  const refresh = useRefreshLedger()
+  const txs = useQuery({
+    queryKey: ['transactions', 'hidden', start, end],
+    queryFn: () => api.get<{ items: import('../lib/types').Transaction[] }>(`/api/transactions${qs({ stats_hidden: true, date_from: start, date_to: end, limit: 100 })}`),
+  })
+  const show = useMutation({
+    mutationFn: (a: { tx: number } | { account: number }) =>
+      'tx' in a ? api.post('/api/transactions/stats-hidden', { ids: [a.tx], hidden: false }) : api.post('/api/insights/hidden-accounts', { account_id: a.account, hidden: false }),
+    onSuccess: () => { refresh(); txs.refetch() },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
+  return (
+    <Sheet open onClose={onClose} title={t('hidden_title')}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">{t('stats_hidden_help')}</p>
+        {hidden.accounts.length > 0 && (
+          <div>
+            <div className="label">{t('hidden_categories')}</div>
+            <div className="divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200 dark:divide-slate-800 dark:ring-slate-800">
+              {hidden.accounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span className="truncate">{a.code} · {a.name}</span>
+                  <button className="btn-ghost px-2 py-1 text-xs" onClick={() => show.mutate({ account: a.id })}><Eye className="h-3.5 w-3.5" /> {t('stats_show')}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!!txs.data?.items.length && (
+          <div>
+            <div className="label">{t('hidden_entries')}</div>
+            <div className="divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200 dark:divide-slate-800 dark:ring-slate-800">
+              {txs.data.items.map((tx) => (
+                <div key={tx.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span className="min-w-0 truncate">{tx.merchant?.name || tx.counterparty || tx.description}</span>
+                  <button className="btn-ghost shrink-0 px-2 py-1 text-xs" onClick={() => show.mutate({ tx: tx.id })}><Eye className="h-3.5 w-3.5" /> {t('stats_show')}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
+// ------------------------------------------------------------------ balance over time
+interface BalanceData {
+  start: string
+  end: string
+  opening: number
+  closing: number
+  change: number
+  min: number | null
+  max: number | null
+  points: { date: string; balance: number }[]
+  forecast: { monthly_trend: number; months_used: number; open_invoices: number; points: { date: string; balance: number }[] } | null
+}
+
+const ts = (d: string) => new Date(d + 'T00:00').getTime()
+
+export function BalanceCard({ start, end, forecastable = true, compactView = false }: { start?: string; end?: string; forecastable?: boolean; compactView?: boolean }) {
+  const { t, locale } = useI18n()
+  const c = useChartColors()
+  const { accounts } = useAccounts()
+  const [scope, setScope] = useState('liquid')
+  const [showForecast, setShowForecast] = useState(true)
+  const q = useQuery({
+    queryKey: ['insights', 'balance', scope, start, end],
+    queryFn: () => api.get<BalanceData>(`/api/insights/balance${qs({ scope, start, end })}`),
+  })
+  const b = q.data
+  const fc = forecastable && showForecast ? b?.forecast : null
+  const data = useMemo(() => {
+    if (!b) return []
+    const rows: { x: number; balance?: number; forecast?: number }[] = b.points.map((p) => ({ x: ts(p.date), balance: num(p.balance) }))
+    for (const p of fc?.points ?? []) {
+      const x = ts(p.date)
+      const same = rows.find((r) => r.x === x)
+      if (same) same.forecast = num(p.balance)
+      else rows.push({ x, forecast: num(p.balance) })
+    }
+    return rows.sort((a, b2) => a.x - b2.x)
+  }, [b, fc])
+  const dfmt = (x: number, withDay = true) => {
+    const d = new Date(x)
+    return new Intl.DateTimeFormat(locale === 'fr' ? 'fr-CH' : 'en-GB', withDay ? { day: 'numeric', month: 'short', year: '2-digit' } : { month: 'short', year: '2-digit' }).format(d)
+  }
+  const money_accounts = accounts.filter((a) => !a.is_group && ['bank', 'cash', 'credit_card'].includes(a.kind) && a.is_active)
+  const last = fc?.points[fc.points.length - 1]
+  const has = data.length > 0
+  const values = data.flatMap((r) => [r.balance, r.forecast]).filter((v): v is number => v != null)
+  const lo = Math.min(0, ...values)
+  const hi = Math.max(0, ...values)
+
+  return (
+    <div className="card p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">{t('balance_evolution')}</h2>
+        {!compactView && (
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="input w-auto py-1.5 text-sm" value={scope} onChange={(e) => setScope(e.target.value)} aria-label={t('balance_scope')}>
+              <option value="liquid">{t('scope_liquid')}</option>
+              <option value="net_worth">{t('net_worth')}</option>
+              {money_accounts.map((a) => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
+            </select>
+            {forecastable && b?.forecast && (
+              <label className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={showForecast} onChange={(e) => setShowForecast(e.target.checked)} /> {t('forecast')}
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+      {!b ? <Spinner /> : (
+        <>
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <div>
+              <div className="text-xs text-slate-500">{t('balance_now')}</div>
+              <Money value={b.closing} className="text-lg font-semibold" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">{t('balance_change')}</div>
+              <Money value={b.change} sign colored className="text-lg font-semibold" />
+            </div>
+            {fc && last ? (
+              <div>
+                <div className="text-xs text-slate-500">{t('forecast_on', { d: dfmt(ts(last.date), false) })}</div>
+                <Money value={last.balance} className="text-lg font-semibold text-slate-500 dark:text-slate-400" />
+              </div>
+            ) : <div />}
+          </div>
+          {has && (
+            <div className={compactView ? 'h-44' : 'h-64'}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={data} margin={{ left: -6, right: 8, top: 8 }}>
+                  <defs>
+                    <linearGradient id="balFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={c.bar} stopOpacity={0.25} />
+                      <stop offset="100%" stopColor={c.bar} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} stroke={c.grid} />
+                  <XAxis dataKey="x" type="number" scale="time" domain={['dataMin', 'dataMax']} tickFormatter={(x) => dfmt(x, false)} fontSize={11} tickLine={false} axisLine={false} stroke={c.axis} minTickGap={24} />
+                  <YAxis tickFormatter={compact} fontSize={11} tickLine={false} axisLine={false} stroke={c.axis} width={52} domain={[lo < 0 ? 'auto' : 0, hi > 0 ? 'auto' : 0]} />
+                  {lo < 0 && <ReferenceLine y={0} stroke={c.axis} strokeDasharray="2 2" />}
+                  <Tooltip
+                    cursor={{ stroke: c.axis, strokeDasharray: '3 3' }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null
+                      const p = payload.find((x) => x.value != null)
+                      if (!p) return null
+                      const isF = p.dataKey === 'forecast' && !payload.some((x) => x.dataKey === 'balance' && x.value != null)
+                      return (
+                        <div className="rounded-xl bg-white px-3 py-2 text-xs shadow-lg ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700">
+                          <div className="text-slate-500">{dfmt(Number(label))}{isF && ` · ${t('forecast')}`}</div>
+                          <div className="text-sm font-semibold tnum">{money(Number(p.value))}</div>
+                        </div>
+                      )
+                    }}
+                  />
+                  <Area type="monotone" dataKey="balance" stroke={c.bar} strokeWidth={2} fill="url(#balFill)" dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+                  {fc && <Line type="monotone" dataKey="forecast" stroke={c.bar} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.7} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {fc && (
+            <p className="mt-2 text-xs text-slate-500">
+              {t('forecast_note', { v: money(fc.monthly_trend, { sign: true }), n: fc.months_used })}
+              {num(fc.open_invoices) > 0 && ' ' + t('forecast_invoices', { v: money(fc.open_invoices) })}
+            </p>
+          )}
+        </>
+      )}
     </div>
   )
 }

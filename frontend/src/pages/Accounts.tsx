@@ -11,7 +11,7 @@ import { useI18n } from '../lib/i18n'
 import type { Account, AccountKind, AccountType } from '../lib/types'
 
 const TYPES: AccountType[] = ['asset', 'liability', 'income', 'expense']
-const KINDS: AccountKind[] = ['other', 'bank', 'credit_card', 'cash', 'receivable', 'equity', 'suspense']
+const KINDS: AccountKind[] = ['other', 'bank', 'credit_card', 'cash', 'receivable', 'payable', 'equity', 'suspense']
 
 export function Accounts() {
   const { t } = useI18n()

@@ -14,6 +14,7 @@ import { Receipts } from './pages/Receipts'
 import { Accounts } from './pages/Accounts'
 import { Reports } from './pages/Reports'
 import { Insights } from './pages/Insights'
+import { Invoices } from './pages/Invoices'
 import { MerchantPage, Merchants } from './pages/MerchantPage'
 import { SettingsPage } from './pages/Settings'
 
@@ -50,6 +51,7 @@ export function App() {
           <Route path="new" element={<NewEntry />} />
           <Route path="imports" element={<Imports />} />
           <Route path="receipts" element={<Receipts />} />
+          <Route path="invoices" element={<Invoices />} />
           <Route path="accounts" element={<Accounts />} />
           <Route path="reports" element={<Reports />} />
           <Route path="insights" element={<Insights />} />

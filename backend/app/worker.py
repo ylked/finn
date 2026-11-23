@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 
 from .ai.classify import classify_with_ai
 from .ai.client import AIError
-from .ai.receipts import extract, try_match
+from .ai.receipts import extract, extract_invoice, try_match
 from .config import get_settings
 from .db import SessionLocal
 from .models import Receipt, Transaction
@@ -93,16 +93,23 @@ def _receipt_one(rid: int) -> None:
             return
         r.attempts += 1
         try:
-            r.extracted = extract(db, r)
-            r.error = None
-            r.status = "unmatched"
-            db.flush()
-            try_match(db, r)
+            if r.kind == "invoice" and r.invoice_id:
+                _read_invoice(db, r)
+            else:
+                r.extracted = extract(db, r)
+                r.error = None
+                r.status = "unmatched"
+                db.flush()
+                try_match(db, r)
         except AIError as e:
             log.warning("receipt %s extraction failed: %s", rid, e)
             r.error = str(e)[:2000]
             if r.attempts >= MAX_ATTEMPTS:
                 r.status = "failed"
+                if r.invoice_id:
+                    from .models import Invoice
+
+                    db.get(Invoice, r.invoice_id).error = r.error
         except Exception as e:
             log.exception("receipt %s unexpected error", rid)
             db.rollback()
@@ -112,6 +119,21 @@ def _receipt_one(rid: int) -> None:
             if r.attempts >= MAX_ATTEMPTS:
                 r.status = "failed"
         db.commit()
+
+
+def _read_invoice(db, r: Receipt) -> None:
+    """An invoice document: fill the invoice from it and book the debt."""
+    from .invoices import apply_extraction
+    from .models import Invoice, Ledger
+
+    data = extract_invoice(db, r)
+    r.extracted = {"merchant": data.get("issuer"), "date": data.get("issue_date"), "total": data.get("total"),
+                   "currency": data.get("currency"), "invoice": data}
+    r.error = None
+    r.status = "matched"  # it belongs to its invoice
+    inv = db.get(Invoice, r.invoice_id)
+    if inv is not None:
+        apply_extraction(db, db.get(Ledger, inv.ledger_id), inv, data)
 
 
 class Worker:

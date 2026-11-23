@@ -34,7 +34,8 @@ CHART: list[tuple[str, str | None, str, str, bool, str, str, str]] = [
     # ---- 2 Passifs
     ("2", None, "liability", "other", True, "Passifs", "Liabilities & equity", ""),
     ("20", "2", "liability", "other", True, "Dettes à court terme", "Short-term liabilities", ""),
-    ("2000", "20", "liability", "other", False, "Factures à payer", "Bills payable", ""),
+    ("2000", "20", "liability", "payable", False, "Factures à payer", "Bills payable",
+     "invoices received and not paid yet; the payment of a recorded invoice settles it"),
     ("2050", "20", "liability", "credit_card", True, "Cartes de crédit", "Credit cards",
      "credit card accounts; a bank payment to the card issuer settles the card balance"),
     ("2051", "2050", "liability", "credit_card", False, "Carte de crédit", "Credit card", ""),

@@ -39,6 +39,7 @@ class LineIn:
     orig_amount: Decimal | None = None
     orig_currency: str | None = None
     bank_entry_id: int | None = None
+    invoice_id: int | None = None
 
 
 def validate_lines(db: Session, ledger_id: int, lines: list[LineIn]) -> None:
@@ -66,8 +67,15 @@ def validate_lines(db: Session, ledger_id: int, lines: list[LineIn]) -> None:
 
 
 def set_lines(db: Session, tx: Transaction, lines: list[LineIn]) -> None:
-    """Replace the lines of a transaction, preserving bank reconciliation links when given."""
+    """Replace the lines of a transaction, preserving bank reconciliation links when given.
+
+    Invoice links follow their account: a line left on the same account keeps its invoice (editing the
+    memo or the date of an invoice payment must not unlink it)."""
     validate_lines(db, tx.ledger_id, lines)
+    kept = {ln.account_id: ln.invoice_id for ln in tx.lines if ln.invoice_id}
+    for ln in lines:
+        if ln.invoice_id is None and ln.account_id in kept:
+            ln.invoice_id = kept.pop(ln.account_id)
     tx.lines.clear()
     db.flush()
     for i, ln in enumerate(lines):
@@ -81,6 +89,7 @@ def set_lines(db: Session, tx: Transaction, lines: list[LineIn]) -> None:
                 orig_amount=ln.orig_amount,
                 orig_currency=ln.orig_currency,
                 bank_entry_id=ln.bank_entry_id,
+                invoice_id=ln.invoice_id,
             )
         )
     db.flush()

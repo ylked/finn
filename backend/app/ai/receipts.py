@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import io
 import json
 import logging
@@ -114,6 +115,60 @@ def extract(db: Session, receipt: Receipt) -> dict:
     data["splits"] = splits
     data["currency"] = (data.get("currency") or ledger.base_currency).upper()[:3]
     return data
+
+
+INVOICE_PROMPT = """Read this invoice / bill (possibly with a Swiss QR payment slip) and return JSON only:
+{{"issuer": str (who must be paid: company or person, short commercial name), "number": str|null (invoice number),
+"issue_date": "YYYY-MM-DD"|null, "due_date": "YYYY-MM-DD"|null (payment deadline; compute it from the payment
+terms, e.g. "30 days net", when only those are printed), "total": number (amount to pay, positive),
+"currency": "ISO code", "iban": str|null (creditor account / QR-IBAN of the payment slip),
+"reference": str|null (payment reference of the QR slip or BVR, as printed), "website": str|null (issuer web domain),
+"account_code": str (the expense account from this chart the invoice belongs to), "description": str (what is billed,
+a few words), "confidence": 0..1}}
+Chart: {chart}
+Default currency if not printed: {ccy}."""
+
+
+def _date(v) -> str | None:
+    try:
+        return dt.date.fromisoformat(str(v)[:10]).isoformat() if v else None
+    except ValueError:
+        return None
+
+
+def extract_invoice(db: Session, receipt: Receipt) -> dict:
+    s = get_settings()
+    ledger = db.get(Ledger, receipt.ledger_id)
+    accounts = db.scalars(
+        select(Account).where(Account.ledger_id == receipt.ledger_id, Account.is_group.is_(False), Account.is_active,
+                              Account.type == "expense")
+    ).all()
+    chart = json.dumps([{"code": a.code, "name": a.name} for a in accounts], ensure_ascii=False)
+    images = file_to_images(Path(receipt.storage_path), receipt.mime_type)
+    content: list[dict] = [{"type": "text", "text": INVOICE_PROMPT.format(chart=chart, ccy=ledger.base_currency)}]
+    for b64 in images:
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+    data = chat_json(s.ai_vision_model, [{"role": "user", "content": content}])
+    try:
+        total = q(data.get("total"))
+    except (InvalidOperation, TypeError, ValueError) as e:
+        raise AIError("Invoice amount not readable") from e
+    code = str(data.get("account_code") or "")
+    txt = lambda k, n: (str(data.get(k)).strip()[:n] or None) if data.get(k) else None  # noqa: E731
+    return {
+        "issuer": txt("issuer", 255),
+        "number": txt("number", 100),
+        "issue_date": _date(data.get("issue_date")),
+        "due_date": _date(data.get("due_date")),
+        "total": str(abs(total)),
+        "currency": (str(data.get("currency") or "") or ledger.base_currency).upper()[:3],
+        "iban": txt("iban", 34),
+        "reference": txt("reference", 64),
+        "website": txt("website", 253),
+        "account_code": code if code in {a.code for a in accounts} else None,
+        "description": txt("description", 500),
+        "confidence": data.get("confidence"),
+    }
 
 
 def apply_receipt_to_transaction(db: Session, receipt: Receipt, tx: Transaction, *, force: bool = False) -> bool:

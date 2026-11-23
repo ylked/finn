@@ -1,10 +1,10 @@
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, Pencil, Search, Wand2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Pencil, Wand2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { MerchantEditSheet, MerchantLogo, MerchantRow, useMerchants, useRefreshMerchants } from '../components/Merchant'
 import { TxRow, TxSheet } from '../components/Tx'
-import { Empty, Money, PageTitle, Spinner, useToast } from '../components/ui'
+import { Empty, Money, PageTitle, SearchInput, Spinner, useToast } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { fmtDate, fold, money, num } from '../lib/format'
 import { useI18n } from '../lib/i18n'
@@ -173,10 +173,7 @@ export function Merchants() {
         {t('merchants')}
       </PageTitle>
       <p className="text-sm text-slate-500">{t('merchants_help')}</p>
-      <div className="relative">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-        <input className="input pl-9" placeholder={t('merchant_search')} value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
+      <SearchInput placeholder={t('merchant_search')} value={q} onChange={setQ} />
       {list.isLoading ? (
         <Spinner />
       ) : !items.length ? (

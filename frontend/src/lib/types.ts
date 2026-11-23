@@ -1,5 +1,5 @@
 export type AccountType = 'asset' | 'liability' | 'income' | 'expense'
-export type AccountKind = 'bank' | 'credit_card' | 'cash' | 'receivable' | 'equity' | 'suspense' | 'other'
+export type AccountKind = 'bank' | 'credit_card' | 'cash' | 'receivable' | 'payable' | 'equity' | 'suspense' | 'other'
 
 export interface Account {
   id: number
@@ -30,6 +30,7 @@ export interface Line {
   orig_amount?: string | null
   orig_currency?: string | null
   bank_entry_id?: number | null
+  invoice_id?: number | null
 }
 
 export interface BankEntry {
@@ -58,16 +59,18 @@ export interface Transaction {
   description: string
   counterparty: string | null
   notes: string | null
-  source: 'bank' | 'csv' | 'manual' | 'receipt' | 'opening'
+  source: 'bank' | 'csv' | 'manual' | 'receipt' | 'opening' | 'invoice'
   state: TxState
   ai_status: string
   ai_confidence: number | null
   ai_reason: string | null
   lines: Line[]
-  receipts: { id: number; filename: string; mime_type: string; status: string }[]
+  receipts: { id: number; filename: string; mime_type: string; status: string; kind: DocKind }[]
   reconciled: boolean
   merchant: MerchantBrief | null
   merchant_locked: boolean
+  stats_hidden: boolean
+  invoice: InvoiceBrief | null
   bank_entries?: BankEntry[]
   created_at: string
   updated_at: string
@@ -90,7 +93,61 @@ export interface Receipt {
   } | null
   error: string | null
   payment_account_id: number | null
+  kind: DocKind
+  invoice_id: number | null
   created_at: string
+}
+
+export type DocKind = 'receipt' | 'invoice' | 'payment' | 'other'
+
+export interface InvoiceBrief {
+  id: number
+  issuer: string | null
+  number: string | null
+  status: InvoiceStatus
+  due_date: string | null
+  amount: string | null
+  role: 'booking' | 'payment'
+}
+
+export type InvoiceStatus = 'draft' | 'open' | 'paid'
+
+export interface Invoice {
+  id: number
+  status: InvoiceStatus
+  reading: boolean
+  issuer: string | null
+  merchant: MerchantBrief | null
+  number: string | null
+  reference: string | null
+  iban: string | null
+  issue_date: string | null
+  due_date: string | null
+  amount: string | null
+  currency: string
+  account_id: number | null
+  account: { id: number; code: string; name: string } | null
+  description: string | null
+  transaction_id: number | null
+  paid_date: string | null
+  remaining: string | null
+  overdue: boolean
+  days_left: number | null
+  error: string | null
+  documents: Receipt[]
+  created_at: string
+  payments?: { transaction: Transaction; amount: string }[]
+}
+
+export interface InvoiceSummary {
+  open_count: number
+  open_total: string
+  overdue_count: number
+  overdue_total: string
+  due_soon_count: number
+  due_soon_total: string
+  drafts: number
+  upcoming: { id: number; issuer: string | null; number: string | null; due_date: string | null; remaining: string; overdue: boolean; merchant: MerchantBrief | null }[]
 }
 
 export interface Batch {

@@ -4,10 +4,10 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..accounting import AccountingError, LineIn, create_transaction, get_setting, q, suspense_account
@@ -32,6 +32,7 @@ ALLOWED = {
     "application/pdf": ".pdf",
 }
 MAX_SIZE = 25 * 1024 * 1024
+KINDS = ("receipt", "invoice", "payment", "other")
 
 
 def _get(db: Session, c: Ctx, rid: int) -> Receipt:
@@ -55,54 +56,94 @@ def _sniff(content: bytes, declared: str | None, name: str) -> str | None:
     return None
 
 
+async def store_upload(db: Session, c: Ctx, f: UploadFile, *, kind: str = "receipt") -> Receipt:
+    """Check and store an uploaded document; returns the (added, not committed) Receipt row."""
+    s = get_settings()
+    base = Path(s.upload_dir) / str(c.ledger.id) / "receipts"
+    base.mkdir(parents=True, exist_ok=True)
+    content = await f.read(MAX_SIZE + 1)
+    if len(content) > MAX_SIZE:
+        raise HTTPException(413, f"{f.filename}: too large")
+    mime = _sniff(content, f.content_type, f.filename or "")
+    if mime not in ALLOWED:
+        raise HTTPException(415, f"{f.filename}: unsupported file type (JPG, PNG, HEIC, WebP, PDF)")
+    path = base / f"{uuid.uuid4().hex}{ALLOWED[mime]}"
+    path.write_bytes(content)
+    r = Receipt(
+        ledger_id=c.ledger.id,
+        filename=(f.filename or path.name)[:500],
+        storage_path=str(path),
+        mime_type=mime,
+        sha256=hashlib.sha256(content).hexdigest(),
+        status="pending" if s.vision_enabled else "manual",
+        kind=kind,
+        created_by=c.user.id,
+    )
+    db.add(r)
+    return r
+
+
 @router.post("", response_model=list[ReceiptOut])
 async def upload(
     files: list[UploadFile] = File(...),
     payment_account_id: int | None = Form(None),
     transaction_id: int | None = Form(None),
+    kind: str = Form("receipt"),
     c: Ctx = Depends(writer),
     db: Session = Depends(get_db),
 ):
-    s = get_settings()
-    base = Path(s.upload_dir) / str(c.ledger.id) / "receipts"
-    base.mkdir(parents=True, exist_ok=True)
+    if kind not in KINDS:
+        raise HTTPException(422, "Invalid kind")
     tx = _load(db, c, transaction_id) if transaction_id else None
     out = []
     for f in files:
-        content = await f.read(MAX_SIZE + 1)
-        if len(content) > MAX_SIZE:
-            raise HTTPException(413, f"{f.filename}: too large")
-        mime = _sniff(content, f.content_type, f.filename or "")
-        if mime not in ALLOWED:
-            raise HTTPException(415, f"{f.filename}: unsupported file type (JPG, PNG, HEIC, WebP, PDF)")
-        path = base / f"{uuid.uuid4().hex}{ALLOWED[mime]}"
-        path.write_bytes(content)
-        r = Receipt(
-            ledger_id=c.ledger.id,
-            filename=(f.filename or path.name)[:500],
-            storage_path=str(path),
-            mime_type=mime,
-            sha256=hashlib.sha256(content).hexdigest(),
-            status="pending" if s.vision_enabled else "manual",
-            payment_account_id=payment_account_id,
-            created_by=c.user.id,
-        )
+        r = await store_upload(db, c, f, kind=kind)
+        r.payment_account_id = payment_account_id
         if tx is not None:
+            # attached by hand to an entry: nothing to match (and an invoice / payment proof has no splits)
             r.transaction_id = tx.id
             r.status = "matched"
-        db.add(r)
         out.append(r)
     db.commit()
     worker.wake()
     return out
 
 
+def _listed(c: Ctx):
+    # documents of an invoice live with their invoice
+    return select(Receipt).where(Receipt.ledger_id == c.ledger.id, Receipt.invoice_id.is_(None))
+
+
 @router.get("", response_model=list[ReceiptOut])
-def list_receipts(status: str | None = None, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    stmt = select(Receipt).where(Receipt.ledger_id == c.ledger.id)
+def list_receipts(status: str | None = None, limit: int = Query(300, le=2000), c: Ctx = Depends(ctx),
+                  db: Session = Depends(get_db)):
+    stmt = _listed(c)
     if status:
         stmt = stmt.where(Receipt.status.in_(status.split(",")))
-    return db.scalars(stmt.order_by(Receipt.created_at.desc()).limit(300)).all()
+    return db.scalars(stmt.order_by(Receipt.created_at.desc(), Receipt.id.desc()).limit(limit)).all()
+
+
+@router.get("/counts")
+def counts(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Number of documents per status (for the filter chips)."""
+    rows = db.execute(select(Receipt.status, func.count())
+                      .where(Receipt.ledger_id == c.ledger.id, Receipt.invoice_id.is_(None))
+                      .group_by(Receipt.status)).all()
+    return dict(rows)
+
+
+class KindIn(BaseModel):
+    kind: str
+
+
+@router.put("/{rid}/kind", response_model=ReceiptOut)
+def set_kind(rid: int, body: KindIn, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
+    r = _get(db, c, rid)
+    if body.kind not in KINDS:
+        raise HTTPException(422, "Invalid kind")
+    r.kind = body.kind
+    db.commit()
+    return r
 
 
 @router.get("/{rid}", response_model=ReceiptOut)

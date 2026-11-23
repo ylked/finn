@@ -1,10 +1,10 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { CheckSquare, Filter, Search } from 'lucide-react'
+import { CheckSquare, Filter } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AccountPicker } from '../components/AccountPicker'
 import { BulkBar, TxRow, TxSheet, useSelection } from '../components/Tx'
-import { Empty, Money, PageTitle, Spinner } from '../components/ui'
+import { Empty, Money, PageTitle, SearchInput, Spinner } from '../components/ui'
 import { api, qs } from '../lib/api'
 import { fmtDate } from '../lib/format'
 import { useAccounts } from '../lib/hooks'
@@ -72,10 +72,7 @@ export function Transactions() {
           {t('balance')}: <Money value={acc.balance} className="font-semibold text-slate-900 dark:text-slate-100" />
         </div>
       )}
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-        <input className="input pl-9" placeholder={t('search')} defaultValue={params.q ?? ''} onChange={(e) => set('q', e.target.value)} />
-      </div>
+      <SearchInput className="mb-3" placeholder={t('search')} defaultValue={params.q ?? ''} onChange={(v) => set('q', v)} />
       {showFilters && (
         <div className="card mb-3 grid gap-3 p-3 md:grid-cols-4">
           <div>

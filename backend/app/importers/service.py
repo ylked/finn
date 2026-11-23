@@ -105,6 +105,15 @@ def book_entry(
         user_id=user_id,
     )
     matcher = matcher or Matcher(db, ledger)
+    if allow_match and get_setting(ledger, "auto_match", True):
+        from ..invoices import link_payment, match_entry
+
+        inv = match_entry(db, ledger, tx, be)
+        if inv is not None:
+            db.refresh(tx, ["lines"])
+            link_payment(db, ledger, inv, tx)
+            tx.ai_status = "done"
+            return "invoice", tx
     if apply_rules(db, tx):
         tx.ai_status = "done"
         matcher.detect(tx)
@@ -208,7 +217,7 @@ def import_entries(
         res.new += 1
         if how == "matched":
             res.matched += 1
-        elif how == "rule":
+        elif how in ("rule", "invoice"):
             res.classified_by_rule += 1
 
     batch.entries_total = res.total

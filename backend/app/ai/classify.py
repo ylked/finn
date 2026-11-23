@@ -106,7 +106,7 @@ def _chart_for_prompt(db: Session, ledger_id: int, exclude: set[int]) -> list[Ac
             Account.ledger_id == ledger_id,
             Account.is_group.is_(False),
             Account.is_active,
-            Account.kind.notin_(["suspense", "equity"]),
+            Account.kind.notin_(["suspense", "equity", "payable"]),
             Account.id.notin_(exclude or {0}),
         )
         .order_by(Account.code)
