@@ -346,7 +346,7 @@ def balance(start: dt.date | None = None, end: dt.date | None = None, scope: str
     Balances use the asset sign (money you have is positive; a credit card balance is negative).
     The projection continues the median monthly change of the last 6 complete months - leaving out
     invoice payments - and subtracts the open invoices on their due dates."""
-    from ..invoices import remaining_many
+    from ..invoices import remaining_many, settled_account
     from ..models import Invoice
 
     today = dt.date.today()
@@ -400,9 +400,11 @@ def balance(start: dt.date | None = None, end: dt.date | None = None, scope: str
             trend = srt[mid] if len(srt) % 2 else (srt[mid - 1] + srt[mid]) / 2
             trend = trend.quantize(Decimal("0.01"))
             invs = list(db.scalars(select(Invoice).where(Invoice.ledger_id == c.ledger.id, Invoice.status == "open")))
-            rems = remaining_many(db, [i.id for i in invs])
-            # invoices settle on liquid accounts; for net worth they are already counted (booked as debt)
-            dues = [(max(i.due_date or today, today), rems.get(i.id, ZERO)) for i in invs] if scope == "liquid" else []
+            rems = remaining_many(db, invs)
+            # invoices settle on liquid accounts; for net worth they are already counted (booked as debt).
+            # A card bill is not: the card is liquid already, paying it moves money inside the liquid scope.
+            dues = [(max(i.due_date or today, today), rems.get(i.id, ZERO)) for i in invs
+                    if settled_account(db, i) is None] if scope == "liquid" else []
             fpoints = [{"date": today, "balance": Decimal(now_bal)}]
             m = today
             for _ in range(FORECAST_MONTHS):

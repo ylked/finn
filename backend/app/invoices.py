@@ -12,6 +12,15 @@ A payment is any transaction whose counter side is a payable line carrying the i
     bank / card / cash           -paid
 
 The amount still due is minus the sum of the invoice's lines; the invoice is paid when it reaches 0.
+
+An invoice can also be the bill of a debt already in the books (a credit card statement, a loan
+instalment): its account is then that liability. Nothing new is booked, since the purchases are already
+counted; a payment is the usual transfer to that account, its line on the account tagged with the invoice
+
+    credit card account          +paid     invoice_id = the invoice
+    bank                         -paid
+
+and the amount still due is the invoice amount minus those lines.
 Payments are recognised automatically on import (QR reference, creditor IBAN, or amount + name) and
 can be linked by hand.
 """
@@ -79,21 +88,43 @@ def norm_iban(iban: str | None) -> str:
 # ---------------------------------------------------------------------------- state
 
 
+def settled_account(db: Session, inv: Invoice) -> Account | None:
+    """The debt account this invoice is the bill of (credit card...), when it is not a new expense."""
+    if inv.account_id is None:
+        return None
+    acc = db.get(Account, inv.account_id)
+    return acc if acc is not None and acc.type == "liability" and acc.kind != "payable" else None
+
+
+def is_booked(db: Session, inv: Invoice) -> bool:
+    """In the books, so payable: its expense booking exists, or it is the complete bill of an existing debt."""
+    if inv.transaction_id is not None:
+        return True
+    if settled_account(db, inv) is None:
+        return False
+    return not missing(inv, db.get(Ledger, inv.ledger_id).base_currency)
+
+
 def remaining(db: Session, inv: Invoice) -> Decimal:
     """Amount still due."""
-    if inv.transaction_id is None:
-        return q(inv.amount or 0)
-    total = db.scalar(select(func.coalesce(func.sum(JournalLine.amount), 0)).where(JournalLine.invoice_id == inv.id))
-    return -Decimal(total)
+    return remaining_many(db, [inv]).get(inv.id, q(inv.amount or 0))
 
 
-def remaining_many(db: Session, ids: list[int]) -> dict[int, Decimal]:
-    rows = db.execute(
+def remaining_many(db: Session, invs: list[Invoice]) -> dict[int, Decimal]:
+    """Amount still due of booked invoices (the others: their amount, as entered)."""
+    rows = dict(db.execute(
         select(JournalLine.invoice_id, func.sum(JournalLine.amount))
-        .where(JournalLine.invoice_id.in_(ids or [0]))
+        .where(JournalLine.invoice_id.in_([i.id for i in invs] or [0]))
         .group_by(JournalLine.invoice_id)
-    ).all()
-    return {i: -Decimal(v) for i, v in rows}
+    ).all())
+    out = {}
+    for inv in invs:
+        total = Decimal(rows.get(inv.id) or 0)
+        if inv.transaction_id is not None:
+            out[inv.id] = -total
+        elif is_booked(db, inv):
+            out[inv.id] = q(inv.amount) - total  # bill of a debt: what the tagged payments have not covered
+    return out
 
 
 def payment_lines(db: Session, inv: Invoice) -> list[JournalLine]:
@@ -108,7 +139,7 @@ def payment_lines(db: Session, inv: Invoice) -> list[JournalLine]:
 def refresh(db: Session, inv: Invoice, rem: Decimal | None = None) -> str:
     """Recompute the status from the books (the booking may have been deleted, a payment edited...)."""
     db.flush()
-    if inv.transaction_id is None:
+    if not is_booked(db, inv):
         inv.status, inv.paid_date = "draft", None
         return inv.status
     rem = remaining(db, inv) if rem is None else rem
@@ -138,7 +169,12 @@ def missing(inv: Invoice, base_currency: str) -> list[str]:
 
 def book(db: Session, ledger: Ledger, inv: Invoice, *, state: str = "confirmed",
          user_id: int | None = None, matcher: Matcher | None = None, domain: str | None = None) -> Transaction | None:
-    """Create or update the booking transaction (expense / payable). Returns None while incomplete."""
+    """Create or update the booking transaction (expense / payable). Returns None while incomplete,
+    and for the bill of an existing debt (nothing to book)."""
+    if settled_account(db, inv) is not None:
+        _drop_booking(db, inv)
+        refresh(db, inv)
+        return None
     if missing(inv, ledger.base_currency):
         return None
     payable = payable_account(db, ledger.id)
@@ -184,6 +220,23 @@ def book(db: Session, ledger: Ledger, inv: Invoice, *, state: str = "confirmed",
     return tx
 
 
+def _drop_booking(db: Session, inv: Invoice) -> None:
+    """The invoice turned out to be the bill of an existing debt: no expense booking."""
+    tx = inv.transaction
+    if tx is None:
+        return
+    inv.transaction_id, inv.transaction = None, None
+    if tx.source == "invoice" and not any(ln.bank_entry_id for ln in tx.lines):
+        for r in list(tx.receipts):
+            r.transaction = None
+        db.delete(tx)
+    else:  # an entry the user wrote: keep it, just not as this invoice's booking
+        for ln in tx.lines:
+            if ln.invoice_id == inv.id:
+                ln.invoice_id = None
+    db.flush()
+
+
 def adopt(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction) -> None:
     """Make an entry already booked against the payable account (expense / 2000) the invoice's booking.
     Missing invoice fields are taken from the entry."""
@@ -223,8 +276,8 @@ def _payment_side(tx: Transaction) -> JournalLine | None:
 
 def link_payment(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction, *, state: str = "confirmed") -> None:
     """Make ``tx`` (money out of a bank / card / cash account) a payment of ``inv``: its counter side
-    becomes the payable account, tagged with the invoice."""
-    if inv.transaction_id is None:
+    becomes the payable account (or the debt account the invoice is the bill of), tagged with the invoice."""
+    if not is_booked(db, inv):
         raise AccountingError("The invoice is not booked yet (amount missing?)")
     if tx.id == inv.transaction_id:
         raise AccountingError("This is the invoice itself")
@@ -233,6 +286,10 @@ def link_payment(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction, *, 
     other = {ln.invoice_id for ln in tx.lines if ln.invoice_id and ln.invoice_id != inv.id}
     if other:
         raise AccountingError("This transaction already pays another invoice")
+    debt = settled_account(db, inv)
+    if debt is not None:
+        _link_to_debt(db, inv, tx, debt, state)
+        return
     src = _payment_side(tx)
     if src is None or src.amount >= 0:
         raise AccountingError("Only a payment (money out of a bank, card or cash account) can settle an invoice")
@@ -254,11 +311,39 @@ def link_payment(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction, *, 
     refresh(db, inv)
 
 
+def _link_to_debt(db: Session, inv: Invoice, tx: Transaction, debt: Account, state: str) -> None:
+    """Payment of the bill of a debt: the transfer's line on the debt account carries the invoice."""
+    line = next((ln for ln in tx.lines if ln.account_id == debt.id and ln.amount > 0 and not ln.invoice_id), None)
+    if line is not None:
+        line.invoice_id = inv.id  # already a transfer to the card: just say which bill it pays
+    else:
+        src = next((ln for ln in tx.lines if ln.amount < 0 and ln.account.kind in PAYMENT_KINDS
+                    and ln.account_id != debt.id), None)
+        others = [ln for ln in tx.lines if ln is not src]
+        if src is None or len(others) != 1 or others[0].bank_entry_id:
+            raise AccountingError(f"Choose a payment to {debt.code} {debt.name} or one still to classify")
+        set_lines(db, tx, [LineIn(src.account_id, src.amount, src.memo, src.orig_amount, src.orig_currency,
+                                  src.bank_entry_id),
+                           LineIn(debt.id, -src.amount, None, invoice_id=inv.id)])
+        tx.state = state
+    if tx.ai_status == "pending":
+        tx.ai_status = "done"
+    db.flush()
+    db.refresh(tx, ["lines"])
+    refresh(db, inv)
+
+
 def unlink_payment(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction) -> None:
     """Not a payment of this invoice after all: the counter side goes back to 'to classify'."""
     mine = [ln for ln in tx.lines if ln.invoice_id == inv.id]
     if not mine or tx.id == inv.transaction_id:
         raise AccountingError("This transaction is not a payment of the invoice")
+    if settled_account(db, inv) is not None:
+        for ln in mine:  # still a transfer to the card, just not for this bill
+            ln.invoice_id = None
+        db.flush()
+        refresh(db, inv)
+        return
     susp = suspense_account(db, ledger.id)
     lines = []
     for ln in tx.lines:
@@ -285,9 +370,11 @@ def pay_from(db: Session, ledger: Ledger, inv: Invoice, account_id: int, date: d
     if acc is None or acc.ledger_id != ledger.id or acc.kind not in PAYMENT_KINDS or acc.is_group:
         raise AccountingError("Choose a bank, card or cash account")
     rem = remaining(db, inv)
-    if inv.transaction_id is None or rem <= 0:
+    if not is_booked(db, inv) or rem <= 0:
         raise AccountingError("Nothing left to pay")
-    payable = payable_account(db, ledger.id)
+    payable = settled_account(db, inv) or payable_account(db, ledger.id)
+    if acc.id == payable.id:
+        raise AccountingError("Choose the account the bill was paid from")
     label = " ".join(x for x in ("Paiement facture", inv.issuer or "", inv.number and f"n° {inv.number}") if x)
     tx = create_transaction(db, ledger.id, date, label,
                             [LineIn(payable.id, rem, None, invoice_id=inv.id), LineIn(acc.id, -rem)],
@@ -332,7 +419,7 @@ def match_entry(db: Session, ledger: Ledger, tx: Transaction, be: BankEntry) -> 
     invs = db.scalars(select(Invoice).where(Invoice.ledger_id == ledger.id, Invoice.status == "open")).all()
     if not invs:
         return None
-    rems = remaining_many(db, [i.id for i in invs])
+    rems = remaining_many(db, invs)
     text = _entry_text(be, tx)
     scored = []
     for inv in invs:
@@ -354,7 +441,7 @@ def _pick(scored: list) -> Invoice | None:
 def find_payment(db: Session, ledger: Ledger, inv: Invoice) -> Transaction | None:
     """For a newly booked invoice: an already imported payment that is not classified yet."""
     rem = remaining(db, inv)
-    if inv.transaction_id is None or rem <= 0:
+    if not is_booked(db, inv) or rem <= 0:
         return None
     best = None
     for tx, ln, be in _outflows(db, ledger, inv, states=("unclassified", "auto")):
@@ -382,6 +469,8 @@ def _outflows(db: Session, ledger: Ledger, inv: Invoice, states: tuple[str, ...]
                Transaction.date.between(start, end), Transaction.source != "opening",
                Transaction.id != (inv.transaction_id or 0))
         .where(~Transaction.lines.any(JournalLine.invoice_id.is_not(None)))
+        # the bill of a card is paid by a transfer to it, not by spending on it
+        .where(JournalLine.account_id != (inv.account_id if settled_account(db, inv) else 0))
         .order_by(Transaction.date)
         .limit(limit)
     )
@@ -434,6 +523,7 @@ def apply_extraction(db: Session, ledger: Ledger, inv: Invoice, data: dict) -> N
     if inv.amount is None and data.get("total"):
         inv.amount = q(data["total"])
         inv.currency = data.get("currency") or ledger.base_currency
+    was_booked = is_booked(db, inv)
     if inv.account_id is None and data.get("account_code"):
         inv.account_id = db.scalar(select(Account.id).where(Account.ledger_id == ledger.id,
                                                             Account.code == data["account_code"]))
@@ -443,6 +533,6 @@ def apply_extraction(db: Session, ledger: Ledger, inv: Invoice, data: dict) -> N
         inv.error = ("Montant en devise étrangère : indiquez le montant en " + ledger.base_currency
                      if "currency" in gaps else "Montant illisible")
         return
-    if inv.transaction_id is None:
+    if not was_booked:
         book(db, ledger, inv, state="auto", domain=data.get("website"))
         after_booking(db, ledger, inv)

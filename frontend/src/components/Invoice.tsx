@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, qs } from '../lib/api'
 import { fmtDate, money, num, today } from '../lib/format'
-import { useRefreshLedger } from '../lib/hooks'
+import { useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { DocKind, Invoice, Transaction } from '../lib/types'
 import { AccountPicker } from './AccountPicker'
@@ -88,6 +88,10 @@ function payload(f: Form) {
 
 function InvoiceFields({ f, set, split = false }: { f: Form; set: (p: Partial<Form>) => void; split?: boolean }) {
   const { t } = useI18n()
+  const { accounts, byId } = useAccounts()
+  // a category (new expense), or a debt already in the books whose bill this is (credit card, loan)
+  const payable = accounts.filter((a) => a.kind === 'payable').map((a) => a.id)
+  const settles = f.account_id != null && byId.get(f.account_id)?.type === 'liability'
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label={t('inv_issuer')} className="col-span-2"><input className="input" value={f.issuer} onChange={(e) => set({ issuer: e.target.value })} /></Field>
@@ -103,7 +107,10 @@ function InvoiceFields({ f, set, split = false }: { f: Form; set: (p: Partial<Fo
       {split ? (
         <Field label={t('category')} className="col-span-2"><div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">{t('inv_split')}</div></Field>
       ) : (
-        <Field label={t('category')} className="col-span-2"><AccountPicker value={f.account_id} onChange={(id) => set({ account_id: id })} types={['expense']} /></Field>
+        <Field label={t('inv_account')} className="col-span-2">
+          <AccountPicker value={f.account_id} onChange={(id) => set({ account_id: id })} types={['expense', 'liability']} exclude={payable} />
+          <p className="mt-1 text-xs text-slate-500">{settles ? t('inv_settles_help') : t('inv_account_help')}</p>
+        </Field>
       )}
       <Field label={t('inv_description')} className="col-span-2"><input className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} /></Field>
       <Field label={t('inv_reference')} className="col-span-2 md:col-span-1"><input className="input font-mono text-xs" value={f.reference} onChange={(e) => set({ reference: e.target.value })} /></Field>

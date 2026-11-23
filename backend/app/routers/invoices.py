@@ -54,6 +54,8 @@ def _out(db: Session, inv: Invoice, rem: Decimal | None = None, detail: bool = F
         "account": {"id": inv.account.id, "code": inv.account.code, "name": inv.account.name} if inv.account else None,
         "description": inv.description,
         "transaction_id": inv.transaction_id,
+        # the bill of a debt already in the books (credit card...): nothing booked, paid by a transfer
+        "settles": svc.settled_account(db, inv) is not None,
         # booked over several categories: edit the split in the entry
         "split": bool(inv.transaction) and sum(
             1 for ln in inv.transaction.lines if ln.invoice_id != inv.id and ln.amount > 0) > 1,
@@ -90,12 +92,12 @@ def list_invoices(status: str | None = None, c: Ctx = Depends(ctx), db: Session 
         .options(selectinload(Invoice.documents), selectinload(Invoice.merchant), selectinload(Invoice.account))
         .where(Invoice.ledger_id == c.ledger.id)
     ))
-    rems = svc.remaining_many(db, [i.id for i in invs])
+    rems = svc.remaining_many(db, invs)
     changed = False
     for inv in invs:
         # keep the stored status in line with the books (a booking or payment may have been edited)
         before = inv.status
-        if inv.transaction_id is None:
+        if not svc.is_booked(db, inv):
             inv.status = "draft"
         else:
             r = rems.get(inv.id, Decimal(0))
@@ -123,7 +125,7 @@ def summary(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
 
 def invoice_summary(db: Session, ledger_id: int) -> dict:
     invs = list(db.scalars(select(Invoice).where(Invoice.ledger_id == ledger_id, Invoice.status.in_(["open", "draft"]))))
-    rems = svc.remaining_many(db, [i.id for i in invs if i.status == "open"])
+    rems = svc.remaining_many(db, [i for i in invs if i.status == "open"])
     today = dt.date.today()
     open_ = [i for i in invs if i.status == "open"]
     over = [i for i in open_ if i.due_date and i.due_date < today]
@@ -188,13 +190,13 @@ def _apply(db: Session, c: Ctx, inv: Invoice, body: InvoiceIn) -> None:
             if inv.transaction_id is not None:
                 raise AccountingError("The invoice is already booked")
             svc.adopt(db, c.ledger, inv, _load(db, c, adopt_id, lock=True))
-        was_booked = inv.transaction_id is not None
+        was_booked = svc.is_booked(db, inv) and inv.status != "draft"
         svc.book(db, c.ledger, inv, user_id=c.user.id, domain=clean_domain(domain) if domain else None)
-        if inv.transaction_id is not None:
+        if svc.is_booked(db, inv):
             inv.error = None
             if not was_booked:
                 svc.after_booking(db, c.ledger, inv)
-            elif inv.transaction.state == "auto":
+            elif inv.transaction is not None and inv.transaction.state == "auto":
                 inv.transaction.state = "confirmed"  # the user has checked it
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
@@ -275,7 +277,7 @@ def read_again(iid: int, c: Ctx = Depends(writer), db: Session = Depends(get_db)
 @router.get("/{iid}/candidates")
 def payment_candidates(iid: int, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     inv = _get(db, c, iid)
-    if inv.transaction_id is None:
+    if not svc.is_booked(db, inv):
         return []
     return [to_out(_load_tx(db, t.id)) for t in svc.candidates(db, c.ledger, inv)]
 

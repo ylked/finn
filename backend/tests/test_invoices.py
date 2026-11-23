@@ -230,3 +230,44 @@ def test_split_invoice_paid_in_instalments(client, accounts):
     assert client.get(f"/api/invoices/{inv['id']}/candidates").json()[0]["id"] == last["id"]
     inv = client.post(f"/api/invoices/{inv['id']}/payments", json={"transaction_id": last["id"]}).json()
     assert inv["status"] == "paid" and len(inv["payments"]) == 3
+
+
+def test_credit_card_bill_settles_the_card(client, accounts):
+    """The bill of a debt already in the books: no new expense, paid by a transfer to the card."""
+    a = {k: v["id"] for k, v in accounts.items()}
+    card, bank = a["2051"], a["1020"]
+    # 120 spent on the card in March (already an expense)
+    client.post("/api/transactions", json={"date": "2026-03-05", "description": "COOP", "lines": [
+        {"account_id": card, "amount": "-120"}, {"account_id": a["4100"], "amount": "120"}]})
+    inv = client.post("/api/invoices", json={"issuer": "UBS Card Center", "amount": "120", "issue_date": "2026-03-31",
+                                             "due_date": "2026-04-20", "account_id": card}).json()
+    assert inv["status"] == "open" and inv["settles"] and inv["transaction_id"] is None
+    assert Decimal(str(inv["remaining"])) == 120
+    assert client.get("/api/invoices/summary").json()["open_count"] == 1
+
+    # paid from the bank: a transfer bank -> card tagged with the bill
+    inv = client.post(f"/api/invoices/{inv['id']}/pay", json={"account_id": bank, "date": "2026-04-15"}).json()
+    assert inv["status"] == "paid" and len(inv["payments"]) == 1
+    pay = inv["payments"][0]["transaction"]
+    assert {ln["account_code"]: Decimal(ln["amount"]) for ln in pay["lines"]} == {"1020": Decimal("-120"), "2051": Decimal("120")}
+    accs = {x["code"]: x for x in client.get("/api/accounts").json()}
+    assert Decimal(accs["2051"]["balance"]) == 0  # debt settled, spending counted once
+    stmt = client.get("/api/reports/income-statement", params={"start": "2026-03-01", "end": "2026-04-30"})
+    if stmt.status_code == 200:
+        assert "2000" not in str(stmt.json())
+
+    # unlinking keeps the transfer, the bill is open again; linking it back pays it
+    inv = client.delete(f"/api/invoices/{inv['id']}/payments/{pay['id']}").json()
+    assert inv["status"] == "open"
+    assert client.get(f"/api/transactions/{pay['id']}").json()["state"] != "unclassified"
+    inv = client.post(f"/api/invoices/{inv['id']}/payments", json={"transaction_id": pay["id"]}).json()
+    assert inv["status"] == "paid"
+
+    # switching an expense invoice to the card account drops its expense booking
+    inv2 = client.post("/api/invoices", json={"issuer": "UBS Card Center", "amount": "80", "issue_date": "2026-04-30",
+                                              "account_id": a["4990"]}).json()
+    booking = inv2["transaction_id"]
+    assert booking is not None
+    inv2 = client.patch(f"/api/invoices/{inv2['id']}", json={"account_id": card}).json()
+    assert inv2["transaction_id"] is None and inv2["settles"] and inv2["status"] == "open"
+    assert client.get(f"/api/transactions/{booking}").status_code == 404
