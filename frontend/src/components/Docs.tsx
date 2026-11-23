@@ -24,7 +24,7 @@ export function DocThumb({ d, size = 'h-10 w-10' }: { d: Doc; size?: string }) {
 /** Documents attached to an entry or an invoice: open, change type, delete, add (choosing the type). */
 export function DocList({ docs, upload, kinds = DOC_KINDS, onChanged, addLabel }: {
   docs: Doc[]
-  upload: (files: FileList, kind: DocKind) => Promise<unknown>
+  upload: (files: File[], kind: DocKind) => Promise<unknown>
   kinds?: DocKind[]
   onChanged: () => void
   addLabel?: string
@@ -35,7 +35,7 @@ export function DocList({ docs, upload, kinds = DOC_KINDS, onChanged, addLabel }
   const [choose, setChoose] = useState(false)
   const [kind, setKind] = useState<DocKind>(kinds[0])
   const err = (e: unknown) => toast(String((e as Error).message), 'error')
-  const add = useMutation({ mutationFn: (files: FileList) => upload(files, kind), onSuccess: onChanged, onError: err })
+  const add = useMutation({ mutationFn: (files: File[]) => upload(files, kind), onSuccess: onChanged, onError: err })
   const del = useMutation({ mutationFn: (id: number) => api.del(`/api/receipts/${id}`), onSuccess: () => { toast(t('doc_deleted')); onChanged() }, onError: err })
   const retype = useMutation({ mutationFn: ({ id, kind }: { id: number; kind: DocKind }) => api.put(`/api/receipts/${id}/kind`, { kind }), onSuccess: onChanged, onError: err })
 
@@ -65,7 +65,7 @@ export function DocList({ docs, upload, kinds = DOC_KINDS, onChanged, addLabel }
           ))}
         </div>
       )}
-      <input ref={fileRef} type="file" accept="image/*,application/pdf,.heic" multiple hidden onChange={(e) => { if (e.target.files?.length) add.mutate(e.target.files); e.target.value = '' }} />
+      <input ref={fileRef} type="file" accept="image/*,application/pdf,.heic" multiple hidden onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) add.mutate(files) }} />
       <button className="btn-ghost text-sm" onClick={() => (kinds.length > 1 ? setChoose(true) : fileRef.current?.click())} disabled={add.isPending}>
         <Paperclip className="h-4 w-4" /> {add.isPending ? '…' : addLabel ?? t('add_document')}
       </button>

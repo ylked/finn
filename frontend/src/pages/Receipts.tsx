@@ -44,9 +44,9 @@ export function Receipts() {
   const total = Object.values(c).reduce((a, b) => a + b, 0)
   const countOf = (f: Filter) => (f === 'all' ? total : f === 'todo' ? TODO.reduce((a, k) => a + (c[k] ?? 0), 0) : c[f] ?? 0)
   const upload = useMutation({
-    mutationFn: (files: FileList) => {
+    mutationFn: (files: File[]) => {
       const fd = new FormData()
-      Array.from(files).forEach((f) => fd.append('files', f))
+      files.forEach((f) => fd.append('files', f))
       if (payment) fd.append('payment_account_id', String(payment))
       return api.post<Receipt[]>('/api/receipts', fd)
     },
@@ -54,8 +54,10 @@ export function Receipts() {
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.length) upload.mutate(e.target.files)
+    // copy first: Safari empties the FileList in place when the input is reset
+    const files = Array.from(e.target.files ?? [])
     e.target.value = ''
+    if (files.length) upload.mutate(files)
   }
 
   return (

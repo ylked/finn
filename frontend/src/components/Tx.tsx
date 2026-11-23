@@ -183,7 +183,7 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
 
-  const uploadDocs = (files: FileList, kind: DocKind) => {
+  const uploadDocs = (files: File[], kind: DocKind) => {
     const fd = new FormData()
     Array.from(files).forEach((f) => fd.append('files', f))
     fd.append('transaction_id', String(tx.id))

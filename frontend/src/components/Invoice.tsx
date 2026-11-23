@@ -178,7 +178,7 @@ export function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () =
               <DocList
                 docs={inv.documents}
                 kinds={['payment', 'invoice', 'other']}
-                upload={(files: FileList, kind: DocKind) => { const fd = new FormData(); Array.from(files).forEach((x) => fd.append('files', x)); fd.append('kind', kind); return api.post(`/api/invoices/${inv.id}/documents`, fd) }}
+                upload={(files: File[], kind: DocKind) => { const fd = new FormData(); files.forEach((x) => fd.append('files', x)); fd.append('kind', kind); return api.post(`/api/invoices/${inv.id}/documents`, fd) }}
                 onChanged={done}
               />
             </div>

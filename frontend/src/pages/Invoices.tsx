@@ -35,9 +35,9 @@ export function Invoices() {
     refetchInterval: (q) => (q.state.data?.some((i) => i.reading) ? 3000 : false),
   })
   const upload = useMutation({
-    mutationFn: (files: FileList) => {
+    mutationFn: (files: File[]) => {
       const fd = new FormData()
-      Array.from(files).forEach((f) => fd.append('files', f))
+      files.forEach((f) => fd.append('files', f))
       return api.post<Invoice[]>('/api/invoices/upload', fd)
     },
     onSuccess: (r) => {
@@ -48,8 +48,10 @@ export function Invoices() {
     onError: (e) => toast(String((e as Error).message), 'error'),
   })
   const onFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.length) upload.mutate(e.target.files)
+    // copy first: Safari empties the FileList in place when the input is reset
+    const files = Array.from(e.target.files ?? [])
     e.target.value = ''
+    if (files.length) upload.mutate(files)
   }
 
   const all = q.data ?? []

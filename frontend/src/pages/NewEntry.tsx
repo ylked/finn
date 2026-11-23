@@ -34,7 +34,7 @@ export function NewEntry() {
     { key: ++seq, account_id: null, debit: '', credit: '', memo: '' },
     { key: ++seq, account_id: null, debit: '', credit: '', memo: '' },
   ])
-  const [files, setFiles] = useState<FileList | null>(null)
+  const [files, setFiles] = useState<File[] | null>(null)
 
   const total = parseAmount(amount) ?? 0
   // first split takes the remainder
@@ -195,7 +195,7 @@ export function NewEntry() {
         )}
 
         <div className="flex items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => setFiles(e.target.files)} />
+          <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
           <button className="btn-ghost text-sm" onClick={() => fileRef.current?.click()}>
             <Paperclip className="h-4 w-4" /> {files?.length ? `${files.length} ✓` : t('attach_receipt')}
           </button>
