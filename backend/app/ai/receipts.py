@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import logging
+import threading
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -39,16 +40,23 @@ def _image_to_jpeg_b64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+_PDFIUM_LOCK = threading.Lock()
+
+
 def file_to_images(path: Path, mime: str) -> list[str]:
     """Return base64 JPEGs (max 3 pages for PDFs)."""
     if mime == "application/pdf" or path.suffix.lower() == ".pdf":
         import pypdfium2 as pdfium
 
-        pdf = pdfium.PdfDocument(str(path))
-        out = []
-        for i in range(min(len(pdf), 3)):
-            out.append(_image_to_jpeg_b64(pdf[i].render(scale=2).to_pil()))
-        return out
+        # PDFium is not thread-safe: the worker extracts several receipts in parallel threads, and
+        # concurrent calls fail with "Data format error" (or worse). Render one document at a time.
+        with _PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(str(path))
+            try:
+                pages = [pdf[i].render(scale=2).to_pil() for i in range(min(len(pdf), 3))]
+            finally:
+                pdf.close()
+        return [_image_to_jpeg_b64(img) for img in pages]
     with Image.open(path) as img:
         return [_image_to_jpeg_b64(img)]
 

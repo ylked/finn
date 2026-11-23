@@ -74,3 +74,33 @@ def test_receipt_flow(client, accounts, monkeypatch):
     assert tx["state"] == "auto" and len(tx["lines"]) == 3
     assert {ln["account_code"] for ln in tx["lines"]} >= {"4100", "4030"}
     assert sum(Decimal(ln["amount"]) for ln in tx["lines"]) == 0
+
+
+def test_pdf_rendering_is_thread_safe(tmp_path):
+    """The worker renders receipts in parallel threads; PDFium itself is not thread-safe."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import pypdfium2 as pdfium
+
+    from app.ai.receipts import file_to_images
+
+    import pypdfium2.raw as raw
+
+    paths = []
+    for i in range(8):  # a few pages of text each: blank pages are too quick to collide
+        doc = pdfium.PdfDocument.new()
+        for _ in range(3):
+            page = doc.new_page(600, 800)
+            for k in range(40):
+                obj = raw.FPDFPageObj_NewTextObj(doc, b"Helvetica", 12.0)
+                raw.FPDFPageObj_Transform(obj, 1, 0, 0, 1, 20, 20 + k * 18)
+                raw.FPDFPage_InsertObject(page, obj)
+            raw.FPDFPage_GenerateContent(page)
+            page.close()
+        p = tmp_path / f"r{i}.pdf"
+        doc.save(str(p))
+        doc.close()
+        paths.append(p)
+    with ThreadPoolExecutor(8) as ex:
+        res = list(ex.map(lambda p: file_to_images(p, "application/pdf"), paths * 10))
+    assert all(len(r) == 3 for r in res)
