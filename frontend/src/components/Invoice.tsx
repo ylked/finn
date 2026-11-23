@@ -86,7 +86,7 @@ function payload(f: Form) {
   }
 }
 
-function InvoiceFields({ f, set }: { f: Form; set: (p: Partial<Form>) => void }) {
+function InvoiceFields({ f, set, split = false }: { f: Form; set: (p: Partial<Form>) => void; split?: boolean }) {
   const { t } = useI18n()
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -100,7 +100,11 @@ function InvoiceFields({ f, set }: { f: Form; set: (p: Partial<Form>) => void })
       <Field label={t('inv_number')}><input className="input" value={f.number} onChange={(e) => set({ number: e.target.value })} /></Field>
       <Field label={t('inv_issue_date')}><input type="date" className="input" value={f.issue_date} onChange={(e) => set({ issue_date: e.target.value })} /></Field>
       <Field label={t('inv_due_date')}><input type="date" className="input" value={f.due_date} onChange={(e) => set({ due_date: e.target.value })} /></Field>
-      <Field label={t('category')} className="col-span-2"><AccountPicker value={f.account_id} onChange={(id) => set({ account_id: id })} types={['expense']} /></Field>
+      {split ? (
+        <Field label={t('category')} className="col-span-2"><div className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-800/50 dark:text-slate-300">{t('inv_split')}</div></Field>
+      ) : (
+        <Field label={t('category')} className="col-span-2"><AccountPicker value={f.account_id} onChange={(id) => set({ account_id: id })} types={['expense']} /></Field>
+      )}
       <Field label={t('inv_description')} className="col-span-2"><input className="input" value={f.description} onChange={(e) => set({ description: e.target.value })} /></Field>
       <Field label={t('inv_reference')} className="col-span-2 md:col-span-1"><input className="input font-mono text-xs" value={f.reference} onChange={(e) => set({ reference: e.target.value })} /></Field>
       <Field label="IBAN" className="col-span-2 md:col-span-1"><input className="input font-mono text-xs" value={f.iban} onChange={(e) => set({ iban: e.target.value })} /></Field>
@@ -195,7 +199,7 @@ export function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () =
               </div>
             )}
 
-            <InvoiceFields f={f} set={(p) => setF((x) => ({ ...x, ...p }))} />
+            <InvoiceFields f={f} split={inv.split} set={(p) => setF((x) => ({ ...x, ...p }))} />
             <div className="flex flex-wrap gap-2">
               <button className="btn-primary flex-1" disabled={!changed || save.isPending} onClick={() => save.mutate()}>
                 {inv.status === 'draft' ? t('inv_save_book') : t('save')}
@@ -327,6 +331,8 @@ export function TxInvoice({ tx, onChanged }: { tx: Transaction; onChanged: () =>
       </Link>
     )
   }
+  const payableCredit = tx.lines.find((l) => l.account_kind === 'payable' && num(l.amount) < 0 && !l.invoice_id)
+  if (payableCredit) return <AdoptButton tx={tx} onChanged={onChanged} />
   if (!canPay) return null
   const sorted = [...(open.data ?? [])].sort((a, b) => Math.abs(num(a.remaining) + amt) - Math.abs(num(b.remaining) + amt))
   return (
@@ -345,5 +351,22 @@ export function TxInvoice({ tx, onChanged }: { tx: Transaction; onChanged: () =>
         )}
       </Sheet>
     </>
+  )
+}
+
+/** An entry booked by hand as expense / bills payable: start tracking it as an invoice. */
+function AdoptButton({ tx, onChanged }: { tx: Transaction; onChanged: () => void }) {
+  const { t } = useI18n()
+  const toast = useToast()
+  const refresh = useRefreshInvoices()
+  const adopt = useMutation({
+    mutationFn: () => api.post<Invoice>('/api/invoices', { transaction_id: tx.id }),
+    onSuccess: (inv) => { toast(t('inv_adopted')); refresh(); onChanged(); window.location.assign(`/invoices?open=${inv.id}`) },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
+  return (
+    <button className="btn-secondary text-sm" onClick={() => adopt.mutate()} disabled={adopt.isPending}>
+      <FileText className="h-4 w-4" /> {t('inv_adopt')}
+    </button>
   )
 }

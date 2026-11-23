@@ -200,3 +200,33 @@ def test_invoice_upload_read_by_ai(client, accounts, monkeypatch):
     # the user corrects it: confirmed
     client.patch(f"/api/invoices/{inv['id']}", json={"amount": "80.00"})
     assert client.get(f"/api/transactions/{inv['transaction_id']}").json()["state"] == "confirmed"
+
+
+def test_split_invoice_paid_in_instalments(client, accounts):
+    a = {k: v["id"] for k, v in accounts.items()}
+    # bought on instalments, booked by hand over three categories against bills payable
+    tx = client.post("/api/transactions", json={"date": "2026-09-25", "description": "Commande 3x",
+                                                "counterparty": "Galaxus", "lines": [
+        {"account_id": a["2000"], "amount": "-511.30"}, {"account_id": a["4600"], "amount": "224.40"},
+        {"account_id": a["4730"], "amount": "230.00"}, {"account_id": a["4810"], "amount": "56.90"}]}).json()
+    pays = [client.post("/api/transactions", json={"date": d, "description": "e-banking Order", "counterparty":
+                                                   "Digitec Galaxus AG", "lines": [
+        {"account_id": a["1020"], "amount": "-170.44"}, {"account_id": a["2000"], "amount": "170.44"}]}).json()
+            for d in ("2026-10-20", "2026-11-11")]
+    inv = client.post("/api/invoices", json={"transaction_id": tx["id"], "issuer": "Digitec Galaxus"}).json()
+    assert inv["status"] == "open" and inv["split"] and Decimal(str(inv["amount"])) == Decimal("511.30")
+    for p in pays:
+        inv = client.post(f"/api/invoices/{inv['id']}/payments", json={"transaction_id": p["id"]}).json()
+    assert Decimal(str(inv["remaining"])) == Decimal("170.42") and inv["status"] == "open"
+    # editing the invoice keeps the split and the user's texts
+    inv = client.patch(f"/api/invoices/{inv['id']}", json={"due_date": "2026-12-11", "account_id": None}).json()
+    booking = client.get(f"/api/transactions/{tx['id']}").json()
+    assert booking["description"] == "Commande 3x" and len(booking["lines"]) == 4
+    assert booking["invoice"]["role"] == "booking"
+    # the last instalment (amount + name) is found when it shows up unclassified
+    last = client.post("/api/transactions", json={"date": "2026-12-10", "description": "e-banking Order",
+                                                  "counterparty": "Digitec Galaxus AG", "lines": [
+        {"account_id": a["1020"], "amount": "-170.42"}, {"account_id": a["1090"], "amount": "170.42"}]}).json()
+    assert client.get(f"/api/invoices/{inv['id']}/candidates").json()[0]["id"] == last["id"]
+    inv = client.post(f"/api/invoices/{inv['id']}/payments", json={"transaction_id": last["id"]}).json()
+    assert inv["status"] == "paid" and len(inv["payments"]) == 3

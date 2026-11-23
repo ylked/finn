@@ -54,6 +54,9 @@ def _out(db: Session, inv: Invoice, rem: Decimal | None = None, detail: bool = F
         "account": {"id": inv.account.id, "code": inv.account.code, "name": inv.account.name} if inv.account else None,
         "description": inv.description,
         "transaction_id": inv.transaction_id,
+        # booked over several categories: edit the split in the entry
+        "split": bool(inv.transaction) and sum(
+            1 for ln in inv.transaction.lines if ln.invoice_id != inv.id and ln.amount > 0) > 1,
         "paid_date": inv.paid_date,
         "remaining": rem if inv.status != "draft" else inv.amount,
         "overdue": inv.status == "open" and inv.due_date is not None and inv.due_date < today,
@@ -156,11 +159,14 @@ class InvoiceIn(BaseModel):
     account_id: int | None = None
     description: str | None = None
     website: str | None = None
+    # an existing entry (expense / bills payable) that records this invoice
+    transaction_id: int | None = None
 
 
 def _apply(db: Session, c: Ctx, inv: Invoice, body: InvoiceIn) -> None:
     data = body.model_dump(exclude_unset=True)
     domain = data.pop("website", None)
+    adopt_id = data.pop("transaction_id", None)
     if "account_id" in data and data["account_id"] is not None:
         a = db.get(Account, data["account_id"])
         if a is None or a.ledger_id != c.ledger.id or a.is_group:
@@ -178,6 +184,10 @@ def _apply(db: Session, c: Ctx, inv: Invoice, body: InvoiceIn) -> None:
     if inv.issue_date and inv.due_date and inv.due_date < inv.issue_date:
         raise HTTPException(422, "The due date is before the invoice date")
     try:
+        if adopt_id and adopt_id != inv.transaction_id:
+            if inv.transaction_id is not None:
+                raise AccountingError("The invoice is already booked")
+            svc.adopt(db, c.ledger, inv, _load(db, c, adopt_id, lock=True))
         was_booked = inv.transaction_id is not None
         svc.book(db, c.ledger, inv, user_id=c.user.id, domain=clean_domain(domain) if domain else None)
         if inv.transaction_id is not None:

@@ -129,6 +129,7 @@ export interface Invoice {
   account: { id: number; code: string; name: string } | null
   description: string | null
   transaction_id: number | null
+  split?: boolean
   paid_date: string | null
   remaining: string | null
   overdue: boolean

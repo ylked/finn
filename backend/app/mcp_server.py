@@ -222,7 +222,7 @@ def _tx(t: schemas.TransactionOut) -> dict:
     )
     d["lines"] = [
         {k: v for k, v in ln.items() if k in ("id", "account_code", "account_name", "amount", "memo", "orig_amount",
-                                               "orig_currency", "bank_entry_id") and v is not None}
+                                               "orig_currency", "bank_entry_id", "invoice_id") and v is not None}
         for ln in d["lines"]
     ]
     if isinstance(t, schemas.TransactionDetail):
@@ -501,6 +501,55 @@ def build_server() -> MCPServer:
         """Mark reviewed entries (state 'auto') as confirmed. Entries still on suspense are skipped."""
         with _Call(write=True) as (db, c):
             return tx_api.confirm_many(transaction_ids, c, db)
+
+    @mcp.tool(annotations=WRITE)
+    def record_invoice(
+        issuer: str | None = None,
+        amount: Annotated[Decimal | None, Field(gt=0, description="Total to pay, in the ledger currency")] = None,
+        issue_date: Date | None = None,
+        due_date: Annotated[Date | None, Field(description="Payment deadline (of the next instalment)")] = None,
+        number: str | None = None,
+        reference: Annotated[str | None, Field(description="QR / BVR payment reference")] = None,
+        iban: str | None = None,
+        account_code: Annotated[str | None, Field(description="Expense category (single category)")] = None,
+        description: str | None = None,
+        transaction_id: Annotated[int | None, Field(
+            description="Existing entry that already books the invoice (expenses / 2000 bills payable, "
+                        "possibly split over several categories): it becomes the invoice's booking")] = None,
+        invoice_id: Annotated[int | None, Field(description="Update this invoice instead of creating one")] = None,
+    ) -> dict:
+        """Create or update an invoice (bill to pay). With an amount it is booked as expense / bills payable
+        on its date, unless transaction_id names an entry that already does so. Payments are linked with
+        link_invoice_payment (instalments: one call per payment)."""
+        from .routers import invoices as inv_api
+
+        with _Call(write=True) as (db, c):
+            data = {k: v for k, v in dict(issuer=issuer, amount=amount, issue_date=issue_date, due_date=due_date,
+                                          number=number, reference=reference, iban=iban, description=description,
+                                          transaction_id=transaction_id).items() if v is not None}
+            if account_code:
+                data["account_id"] = _account(db, c, account_code).id
+            body = inv_api.InvoiceIn(**data)
+            out = inv_api.update(invoice_id, body, c, db) if invoice_id else inv_api.create(body, c, db)
+            out.pop("documents", None)
+            out["payments"] = [{"transaction_id": p["transaction"].id, "amount": p["amount"]}
+                               for p in out.get("payments", [])]
+            return _jsonable(out)
+
+    @mcp.tool(annotations=WRITE)
+    def link_invoice_payment(invoice_id: int, transaction_id: int, unlink: bool = False) -> dict:
+        """Mark an entry (money out of a bank / card / cash account) as a payment, possibly partial, of an
+        invoice: its counter side becomes the bills payable account. unlink=true undoes it (back to
+        'to classify')."""
+        from .routers import invoices as inv_api
+
+        with _Call(write=True) as (db, c):
+            out = (inv_api.unlink_payment(invoice_id, transaction_id, c, db) if unlink else
+                   inv_api.link_payment(invoice_id, inv_api.PaymentIn(transaction_id=transaction_id), c, db))
+            out.pop("documents", None)
+            out["payments"] = [{"transaction_id": p["transaction"].id, "amount": p["amount"]}
+                               for p in out.get("payments", [])]
+            return _jsonable(out)
 
     @mcp.tool(annotations=WRITE)
     def create_rule(

@@ -151,16 +151,25 @@ def book(db: Session, ledger: Ledger, inv: Invoice, *, state: str = "confirmed",
         target = suspense_account(db, ledger.id).id
     date = inv.issue_date or dt.date.today()
     label = " ".join(x for x in ("Facture", inv.issuer or "", inv.number and f"n° {inv.number}") if x)
-    lines = [LineIn(target, q(inv.amount), inv.description[:500] if inv.description else None),
-             LineIn(payable.id, -q(inv.amount), None, invoice_id=inv.id)]
     tx = inv.transaction
+    expense = [LineIn(target, q(inv.amount), inv.description[:500] if inv.description else None)]
+    if tx is not None:
+        # keep a split over several categories (or an entry the user booked himself) as long as it adds up
+        others = [ln for ln in tx.lines if ln.account_id != payable.id]
+        if others and sum(ln.amount for ln in others) == q(inv.amount) and (
+                len(others) > 1 or others[0].account_id == target or inv.account_id is None):
+            expense = [LineIn(ln.account_id, ln.amount, ln.memo, ln.orig_amount, ln.orig_currency, ln.bank_entry_id)
+                       for ln in others]
+    lines = [*expense, LineIn(payable.id, -q(inv.amount), None, invoice_id=inv.id)]
     if tx is None:
         tx = create_transaction(db, ledger.id, date, label, lines, source="invoice", state=state,
                                 counterparty=inv.issuer, user_id=user_id)
         inv.transaction_id, inv.transaction = tx.id, tx
     else:
         set_lines(db, tx, lines)
-        tx.date, tx.description, tx.counterparty = date, label[:500], inv.issuer
+        tx.date = date
+        if tx.source == "invoice":  # an entry the user wrote himself keeps its texts
+            tx.description, tx.counterparty = label[:500], inv.issuer
     if any(db.get(Account, ln.account_id).kind == "suspense" for ln in lines):
         tx.state = "unclassified"
     elif tx.state == "unclassified":
@@ -173,6 +182,35 @@ def book(db: Session, ledger: Ledger, inv: Invoice, *, state: str = "confirmed",
         tx.merchant_id, tx.merchant_locked = inv.merchant_id, True
     refresh(db, inv)
     return tx
+
+
+def adopt(db: Session, ledger: Ledger, inv: Invoice, tx: Transaction) -> None:
+    """Make an entry already booked against the payable account (expense / 2000) the invoice's booking.
+    Missing invoice fields are taken from the entry."""
+    payable = payable_account(db, ledger.id)
+    if tx.ledger_id != ledger.id or tx.source == "opening":
+        raise AccountingError("Unknown transaction")
+    if db.scalar(select(Invoice.id).where(Invoice.transaction_id == tx.id, Invoice.id != inv.id)):
+        raise AccountingError("This entry already records another invoice")
+    credit = [ln for ln in tx.lines if ln.account_id == payable.id and ln.amount < 0]
+    if len(credit) != 1 or (credit[0].invoice_id and credit[0].invoice_id != inv.id):
+        raise AccountingError("The entry needs exactly one credit line on the bills payable account")
+    ln = credit[0]
+    if inv.amount is not None and q(inv.amount) != -ln.amount:
+        raise AccountingError(f"The entry is for {-ln.amount}, the invoice for {inv.amount}")
+    inv.amount = -ln.amount
+    inv.currency = ledger.base_currency
+    inv.issue_date = inv.issue_date or tx.date
+    inv.issuer = inv.issuer or tx.counterparty or tx.description[:255]
+    inv.merchant_id = inv.merchant_id or tx.merchant_id
+    expense = [x for x in tx.lines if x is not ln]
+    if inv.account_id is None and len(expense) == 1:
+        inv.account_id = expense[0].account_id
+    ln.invoice_id = inv.id
+    inv.transaction_id, inv.transaction = tx.id, tx
+    if inv.merchant_id and not tx.merchant_locked:
+        tx.merchant_id, tx.merchant_locked = inv.merchant_id, True
+    refresh(db, inv)
 
 
 # ---------------------------------------------------------------------------- payments
