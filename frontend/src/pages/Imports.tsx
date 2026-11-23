@@ -183,7 +183,7 @@ function CsvMapper({ file, mapping, setMapping, profileId, setProfileId }: { fil
   return (
     <div className="space-y-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/40">
       <div className="text-sm font-medium">{t('csv_mapping')}</div>
-      <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
         <select
           className="input"
           value={profileId ?? ''}

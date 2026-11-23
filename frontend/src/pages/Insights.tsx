@@ -291,7 +291,7 @@ export function Insights() {
 
           <BalanceCard start={p.start} end={p.end} forecastable={p.offset === 0} />
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {/* where the money goes */}
             <div className="card p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -355,7 +355,7 @@ export function Insights() {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {/* merchants */}
             <div className="card p-4">
               <div className="mb-2 flex items-baseline justify-between gap-2">

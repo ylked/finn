@@ -104,7 +104,7 @@ export function Reports() {
       {q.isLoading || !q.data ? (
         <Spinner />
       ) : tab === 'balance' ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="card p-4"><div className="mb-2 font-semibold">{t('type_asset')}</div><Tree rows={q.data.assets} /><Total label={t('total_assets')} value={q.data.total_assets} /></div>
           <div className="card p-4">
             <div className="mb-2 font-semibold">{t('type_liability')}</div>
@@ -115,7 +115,7 @@ export function Reports() {
           <div className="card p-4 md:col-span-2"><div className="flex justify-between font-semibold"><span>{t('net_worth')}</span><Money value={q.data.net_worth} /></div></div>
         </div>
       ) : tab === 'income' ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="card p-4"><div className="mb-2 font-semibold">{t('income')}</div><Tree rows={q.data.income} /><Total label={t('total')} value={q.data.total_income} /></div>
           <div className="card p-4"><div className="mb-2 font-semibold">{t('expenses')}</div><Tree rows={q.data.expenses} /><Total label={t('total')} value={q.data.total_expenses} /></div>
           <div className="card p-4 md:col-span-2"><div className="flex justify-between font-semibold"><span>{t('result')}</span><Money value={q.data.result} colored /></div></div>

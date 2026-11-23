@@ -52,7 +52,7 @@ export function Accounts() {
       {isLoading ? (
         <Spinner />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {TYPES.map((ty) => (
             <div key={ty} className="card overflow-hidden py-1">
               <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{t(`type_${ty}`)}</div>

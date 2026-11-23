@@ -72,7 +72,7 @@ type Form = { issuer: string; number: string; amount: string; currency: string; 
 
 function toForm(inv?: Invoice | null): Form {
   return {
-    issuer: inv?.issuer ?? '', number: inv?.number ?? '', amount: inv?.amount != null ? String(inv.amount) : '', currency: inv?.currency ?? 'CHF',
+    issuer: inv?.issuer ?? '', number: inv?.number ?? '', amount: inv?.amount != null ? num(inv.amount).toFixed(2) : '', currency: inv?.currency ?? 'CHF',
     issue_date: inv?.issue_date ?? '', due_date: inv?.due_date ?? '', account_id: inv?.account_id ?? null,
     reference: inv?.reference ?? '', iban: inv?.iban ?? '', description: inv?.description ?? '',
   }
@@ -94,7 +94,7 @@ function InvoiceFields({ f, set, split = false }: { f: Form; set: (p: Partial<Fo
       <Field label={t('amount')}>
         <div className="flex gap-1">
           <input inputMode="decimal" className="input min-w-0 flex-1 text-right tnum" value={f.amount} onChange={(e) => set({ amount: e.target.value })} />
-          <input className="input w-16 uppercase" maxLength={3} value={f.currency} onChange={(e) => set({ currency: e.target.value.toUpperCase() })} aria-label={t('currency')} />
+          <input className="input w-14 shrink-0 px-2 text-center uppercase" maxLength={3} value={f.currency} onChange={(e) => set({ currency: e.target.value.toUpperCase() })} aria-label={t('currency')} />
         </div>
       </Field>
       <Field label={t('inv_number')}><input className="input" value={f.number} onChange={(e) => set({ number: e.target.value })} /></Field>
@@ -163,8 +163,8 @@ export function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () =
   return (
     <Sheet open={id != null} onClose={onClose} title={inv ? (inv.issuer || t('invoice')) + (inv.number ? ` · ${inv.number}` : '') : t('invoice')} wide>
       {!inv ? <Spinner /> : (
-        <div className="grid gap-4 md:grid-cols-[2fr_3fr]">
-          <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[2fr_3fr]">
+          <div className="min-w-0 space-y-3">
             {main && (isImage(main.mime_type) ? (
               <a href={`/api/receipts/${main.id}/file`} target="_blank" rel="noreferrer"><img src={`/api/receipts/${main.id}/file`} className="max-h-[45vh] w-full rounded-xl bg-slate-50 object-contain dark:bg-slate-800" alt="" /></a>
             ) : main.mime_type === 'application/pdf' ? (
@@ -184,7 +184,7 @@ export function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () =
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <InvoiceStatus inv={inv} />
               {!inv.reading && <span className={inv.overdue ? 'text-sm font-medium text-red-600 dark:text-red-400' : 'text-sm text-slate-500'}>{dueText(t, locale, inv)}</span>}

@@ -154,7 +154,7 @@ function ReceiptSheet({ id, onClose }: { id: number; onClose: () => void }) {
       {!r ? (
         <Spinner />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             {r.mime_type === 'application/pdf' || r.mime_type.includes('heic') || r.mime_type.includes('heif') ? (
               <a className="btn-secondary w-full" href={`/api/receipts/${r.id}/file`} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /> {r.filename}</a>

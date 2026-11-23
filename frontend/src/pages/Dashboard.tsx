@@ -114,7 +114,7 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* balance + forecast */}
         <BalanceCard start={monthsAgo(6)} compactView />
 
@@ -143,7 +143,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* this month by category */}
         <div className="card p-4">
           <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -178,7 +178,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-4">
           <div className="mb-2 text-sm font-semibold">{t('money_accounts')}</div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800">

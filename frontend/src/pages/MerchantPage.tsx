@@ -90,7 +90,7 @@ export function MerchantPage() {
             </p>
           )}
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="card p-4">
               <h2 className="mb-1 text-sm font-semibold">{t('monthly_spending')}</h2>
               <p className="mb-2 text-xs text-slate-500">{t('tap_month')}</p>

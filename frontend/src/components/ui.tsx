@@ -40,7 +40,7 @@ export function Badge({ color = 'gray', children, className = '' }: { color?: ke
 
 export function Field({ label, children, hint, className = '' }: { label: string; children: ReactNode; hint?: ReactNode; className?: string }) {
   return (
-    <label className={cls('block', className)}>
+    <label className={cls('block min-w-0', className)}>
       <span className="label">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>}
@@ -175,7 +175,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
-          className={cls('flex-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition md:flex-none', value === o.value ? 'bg-white shadow-sm dark:bg-slate-950' : 'text-slate-500')}
+          className={cls('min-w-0 flex-1 rounded-lg px-2 py-1.5 text-sm font-medium leading-tight transition sm:px-3 md:flex-none md:whitespace-nowrap', value === o.value ? 'bg-white shadow-sm dark:bg-slate-950' : 'text-slate-500')}
         >
           {o.label}
         </button>
@@ -237,7 +237,7 @@ export function SearchInput({ value, defaultValue, onChange, onEnter, placeholde
 /** Horizontal filter chips (scrolls on phones). */
 export function Chips<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode; count?: number }[] }) {
   return (
-    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 py-1 md:mx-0 md:flex-wrap md:px-0">
       {options.map((o) => (
         <button
           key={o.value}

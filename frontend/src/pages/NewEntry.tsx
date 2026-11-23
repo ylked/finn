@@ -111,7 +111,7 @@ export function NewEntry() {
             </Field>
           )}
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Field label={t('counterparty')}>
             <input className="input" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
           </Field>
