@@ -1,12 +1,12 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowRightLeft, Bot, Store, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
+import { ArrowRightLeft, Banknote, Bot, CircleHelp, CreditCard, Flag, Landmark, Receipt, Store, User, Wallet, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { cents, cls, fmtDate, money, num, parseAmount } from '../lib/format'
 import { accountLabel, useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
-import type { Account, BankEntry, Transaction } from '../lib/types'
+import type { Account, AccountKind, BankEntry, Transaction } from '../lib/types'
 import { AccountPicker } from './AccountPicker'
 import { MerchantLogo, MerchantPicker, TxMerchant, useRefreshMerchants } from './Merchant'
 import { Badge, Field, Money, Segmented, Sheet, useToast } from './ui'
@@ -26,6 +26,30 @@ export function counterLabel(tx: Transaction): string {
   return others.map((l) => l.account_code).join(' · ')
 }
 
+const kindIcons: Partial<Record<AccountKind, typeof Landmark>> = { bank: Landmark, credit_card: CreditCard, cash: Wallet }
+
+/** Icon for an entry without merchant, from what it is: person, transfer, income, to classify… */
+export function TxIcon({ tx }: { tx: Transaction }) {
+  const { t } = useI18n()
+  const { byId } = useAccounts()
+  const kinds = tx.lines.map((l) => l.account_kind)
+  const types = tx.lines.map((l) => byId.get(l.account_id)?.type)
+  const pay = tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
+  let Icon = (pay && kindIcons[pay.account_kind as AccountKind]) || Receipt
+  let label = ''
+  if (tx.source === 'opening') [Icon, label] = [Flag, t('source_opening')]
+  else if (kinds.includes('receivable')) [Icon, label] = [User, t('person')]
+  else if (kinds.includes('suspense')) [Icon, label] = [CircleHelp, t('state_unclassified')]
+  else if (types.includes('income')) [Icon, label] = [Banknote, t('income')]
+  else if (!types.includes('expense') && tx.lines.length > 1) [Icon, label] = [ArrowRightLeft, t('transfer')]
+  else if (types.includes('expense') && !pay) Icon = Receipt
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400" title={label || undefined}>
+      <Icon className="h-4 w-4" />
+    </span>
+  )
+}
+
 export function StateBadge({ tx }: { tx: Transaction }) {
   const { t } = useI18n()
   if (tx.ai_status === 'pending') return <Badge color="violet"><Bot className="h-3 w-3" /> IA</Badge>
@@ -43,7 +67,7 @@ export function TxRow({ tx, onClick, selected, onSelect, raw = false }: { tx: Tr
       {onSelect && <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />}
       <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={onClick}>
         <div className="w-10 shrink-0 text-xs leading-tight text-slate-500 tnum">{fmtDate(tx.date, locale).slice(0, 5)}</div>
-        {tx.merchant ? <MerchantLogo m={tx.merchant} /> : <span className="w-8 shrink-0" />}
+        {tx.merchant ? <MerchantLogo m={tx.merchant} /> : <TxIcon tx={tx} />}
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{(raw ? null : tx.merchant?.name) || tx.counterparty || tx.description}</div>
           <div className="flex items-center gap-1.5 truncate text-xs text-slate-500">
