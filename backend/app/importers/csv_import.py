@@ -32,7 +32,7 @@ class CsvMapping(BaseModel):
     counterparty_column: str | None = None
     amount_mode: str = "single"  # single | debit_credit
     amount_column: str | None = None
-    debit_column: str | None = None  # money out column (positive numbers)
+    debit_column: str | None = None  # money out column; an opposite-signed value is a refund
     credit_column: str | None = None  # money in column (positive numbers)
     invert_sign: bool = False
     decimal_separator: str = "."
@@ -141,6 +141,20 @@ def _parse_date(v: str | None, fmt: str) -> dt.date | None:
         raise CsvError(f"Invalid date '{v}' (expected {fmt})") from e
 
 
+def _column_sign(header: list[str], rows: list[list[str]], column: str | None, sep: str) -> int:
+    """-1 when a debit/credit column is written with negative numbers (some banks do), else 1."""
+    pos = neg = 0
+    for row in rows:
+        try:
+            v = parse_amount(_col(header, row, column), sep)
+        except CsvError:
+            continue
+        if v:
+            pos += v > 0
+            neg += v < 0
+    return -1 if neg > pos else 1
+
+
 def parse(content: bytes, m: CsvMapping, default_currency: str) -> tuple[list[ParsedEntry], list[str]]:
     text = decode(content, m.encoding)
     header, rows = _rows(text, m)
@@ -149,6 +163,10 @@ def parse(content: bytes, m: CsvMapping, default_currency: str) -> tuple[list[Pa
     entries: list[ParsedEntry] = []
     errors: list[str] = []
     seen: dict[str, int] = {}
+    sign_out = sign_in = 1
+    if m.amount_mode == "debit_credit":
+        sign_out = _column_sign(header, rows, m.debit_column, m.decimal_separator)
+        sign_in = _column_sign(header, rows, m.credit_column, m.decimal_separator)
     for n, row in enumerate(rows, start=1 + m.skip_rows + (1 if m.has_header else 0)):
         try:
             date = _parse_date(_col(header, row, m.date_column), m.date_format)
@@ -157,7 +175,8 @@ def parse(content: bytes, m: CsvMapping, default_currency: str) -> tuple[list[Pa
             if m.amount_mode == "debit_credit":
                 out_ = parse_amount(_col(header, row, m.debit_column), m.decimal_separator) or Decimal(0)
                 in_ = parse_amount(_col(header, row, m.credit_column), m.decimal_separator) or Decimal(0)
-                amount = abs(in_) - abs(out_)
+                # a value with the column's unusual sign is a reversal (e.g. a refund written as -6.75 under debit)
+                amount = in_ * sign_in - out_ * sign_out
             else:
                 amount = parse_amount(_col(header, row, m.amount_column), m.decimal_separator)
                 if amount is None:
