@@ -12,6 +12,7 @@ from ..ai.classify import apply_rules_to_unclassified, split_lines
 from ..auth import Ctx, ctx, writer
 from ..db import get_db
 from ..importers.service import book_entry
+from ..merchants import Matcher, brief
 from ..models import Account, BankEntry, ClassificationRule, JournalLine, Transaction
 from ..schemas import (
     BankEntryOut,
@@ -32,7 +33,8 @@ router = APIRouter(prefix="/api", tags=["transactions"])
 def _load(db: Session, c: Ctx, tx_id: int, lock: bool = False) -> Transaction:
     q = (
         select(Transaction)
-        .options(selectinload(Transaction.lines).selectinload(JournalLine.account), selectinload(Transaction.receipts))
+        .options(selectinload(Transaction.lines).selectinload(JournalLine.account), selectinload(Transaction.receipts),
+                 selectinload(Transaction.merchant))
         .where(Transaction.id == tx_id, Transaction.ledger_id == c.ledger.id)
     )
     if lock:
@@ -74,6 +76,8 @@ def to_out(tx: Transaction, cls=TransactionOut):
         lines=lines,
         receipts=[ReceiptBrief.model_validate(r) for r in tx.receipts],
         reconciled=bool(pay) and all(ln.bank_entry_id for ln in pay),
+        merchant=brief(tx.merchant),
+        merchant_locked=tx.merchant_locked,
         created_at=tx.created_at,
         updated_at=tx.updated_at,
     )
@@ -92,6 +96,7 @@ def list_transactions(
     date_to: dt.date | None = None,
     unreconciled: bool = False,
     amount: Decimal | None = None,
+    merchant_id: int | None = None,
     limit: int = Query(50, le=500),
     offset: int = 0,
     c: Ctx = Depends(ctx),
@@ -105,6 +110,8 @@ def list_transactions(
         )
     if state:
         stmt = stmt.where(Transaction.state.in_(state))
+    if merchant_id:
+        stmt = stmt.where(Transaction.merchant_id == merchant_id)
     if source:
         stmt = stmt.where(Transaction.source == source)
     if date_from:
@@ -130,7 +137,8 @@ def list_transactions(
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(
         stmt.options(
-            selectinload(Transaction.lines).selectinload(JournalLine.account), selectinload(Transaction.receipts)
+            selectinload(Transaction.lines).selectinload(JournalLine.account), selectinload(Transaction.receipts),
+            selectinload(Transaction.merchant),
         )
         .order_by(Transaction.date.desc(), Transaction.id.desc())
         .limit(limit)
@@ -202,6 +210,7 @@ def create(body: TransactionIn, c: Ctx = Depends(writer), db: Session = Depends(
         )
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
+    Matcher(db, c.ledger).detect(tx)
     db.commit()
     return to_out(_load(db, c, tx.id), TransactionDetail)
 
@@ -224,10 +233,15 @@ def update(tx_id: int, body: TransactionIn, c: Ctx = Depends(writer), db: Sessio
         acc_svc.set_lines(db, tx, _lines(body))
     except AccountingError as e:
         raise HTTPException(422, str(e)) from e
+    text_changed = (tx.description, tx.counterparty) != (body.description, body.counterparty)
     tx.date = body.date
     tx.description = body.description
     tx.counterparty = body.counterparty
     tx.notes = body.notes
+    if text_changed or tx.merchant_id is None:
+        db.flush()
+        db.refresh(tx, ["lines"])
+        Matcher(db, c.ledger).detect(tx)
     suspense_ids = set(
         db.scalars(select(Account.id).where(Account.ledger_id == c.ledger.id, Account.kind == "suspense"))
     )

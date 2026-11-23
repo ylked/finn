@@ -359,6 +359,24 @@ def build_server() -> MCPServer:
             return _jsonable(reports.monthly(db, c.ledger, start, end))
 
     @mcp.tool(annotations=READ)
+    def spending_insights(start: Date | None = None, end: Date | None = None) -> dict:
+        """Where the money goes: spending totals, by category group and account, per month and weekday,
+        top merchants (shops recognised from statements) and largest expenses. Omit start for all history."""
+        from .routers import insights
+
+        with _Call() as (db, c):
+            return _jsonable(insights.overview(start, end, c, db))
+
+    @mcp.tool(annotations=READ)
+    def merchant_spending(merchant_id: int, start: Date | None = None, end: Date | None = None) -> dict:
+        """Spending at one merchant (ids come from spending_insights or transactions): totals, visits,
+        average purchase, per month, categories. Omit start for the merchant's whole history."""
+        from .routers import insights
+
+        with _Call() as (db, c):
+            return _jsonable(insights.merchant(merchant_id, start, end, c, db))
+
+    @mcp.tool(annotations=READ)
     def account_ledger(account_code: str, start: Date, end: Date) -> dict:
         """General ledger (grand livre) of one account: opening balance, movements with running balance, closing."""
         with _Call() as (db, c):

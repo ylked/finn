@@ -13,6 +13,8 @@ import { Imports } from './pages/Imports'
 import { Receipts } from './pages/Receipts'
 import { Accounts } from './pages/Accounts'
 import { Reports } from './pages/Reports'
+import { Insights } from './pages/Insights'
+import { MerchantPage, Merchants } from './pages/MerchantPage'
 import { SettingsPage } from './pages/Settings'
 
 export function App() {
@@ -50,6 +52,9 @@ export function App() {
           <Route path="receipts" element={<Receipts />} />
           <Route path="accounts" element={<Accounts />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="insights" element={<Insights />} />
+          <Route path="insights/merchants" element={<Merchants />} />
+          <Route path="insights/merchants/:id" element={<MerchantPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="more" element={<MoreMenu />} />
         </Route>

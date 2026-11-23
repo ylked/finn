@@ -111,6 +111,21 @@ cd frontend && npm install && npm run dev
 
 `AUTH_MODE=disabled` logs everyone in as a single local user. Never expose it.
 
+## Insights and merchants
+
+*Statistiques* (Insights) shows where the money goes over a chosen period: totals and savings rate,
+spending by category group or account (tap one to see it per month), per month (tap a month to zoom
+in), per weekday, the merchants where you spend the most and the largest expenses.
+
+Every entry is linked to a **merchant** when possible ("Debit card payment // Migros M Dorigny" →
+Migros). Detection order: the ledger's merchants (their *recognised texts*), a built-in catalog of
+common Swiss and international shops (`backend/app/merchant_catalog.py`), the AI classifier's
+suggestion, then a cleaned-up counterparty name for card / TWINT purchases (never people or
+transfers between your own accounts). Fix a wrong merchant from the entry (optionally teaching it
+to recognise similar entries), in bulk from a selection, or on the merchant's page (rename, website
+for the logo, recognised texts, own logo, merge, delete). Manual choices are never overwritten.
+Logos are fetched by the server and cached; see `MERCHANT_LOGOS` in `.env.example`.
+
 ## How the accounting works
 
 | Concept | Implementation |

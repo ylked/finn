@@ -83,6 +83,9 @@ def test_mcp_read_and_write(client, accounts):
     tx = data(res)
     assert tx["state"] == "confirmed" and len(tx["lines"]) == 3
 
+    ins = data(call(client, ro, "spending_insights", {"start": "2026-01-01", "end": "2026-01-31"}))
+    assert ins["totals"]["expenses"] == "40.00" and ins["categories"][0]["code"] == "4000"
+
     # unbalanced entries are refused with a readable error
     res = call(client, rw, "create_transaction", {
         "date": "2026-01-05", "description": "bad",

@@ -25,6 +25,15 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 
 
+def _guess_merchant(db, tx: Transaction) -> None:
+    """No AI answer: fall back to the text heuristics for the merchant."""
+    if tx.merchant_id is None and not tx.merchant_locked:
+        from .merchants import Matcher
+        from .models import Ledger
+
+        Matcher(db, db.get(Ledger, tx.ledger_id)).detect(tx)
+
+
 def _classify_one(tx_id: int) -> None:
     s = get_settings()
     with SessionLocal() as db:
@@ -37,21 +46,25 @@ def _classify_one(tx_id: int) -> None:
             return
         if not s.ai_enabled:
             tx.ai_status = "skipped"
+            _guess_merchant(db, tx)
             db.commit()
             return
         if tx.state != "unclassified":
             tx.ai_status = "done"
+            _guess_merchant(db, tx)
             db.commit()
             return
         tx.ai_attempts += 1
         try:
             classify_with_ai(db, tx)
             tx.ai_status = "done"
+            _guess_merchant(db, tx)
         except AIError as e:
             log.warning("classification failed for tx %s: %s", tx_id, e)
             tx.ai_reason = f"Erreur IA / AI error: {e}"[:2000]
             if tx.ai_attempts >= MAX_ATTEMPTS:
                 tx.ai_status = "failed"
+                _guess_merchant(db, tx)
         except Exception:
             log.exception("unexpected classification error for tx %s", tx_id)
             db.rollback()

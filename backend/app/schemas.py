@@ -103,6 +103,12 @@ class ReceiptBrief(ORM):
     status: str
 
 
+class MerchantBrief(BaseModel):
+    id: int
+    name: str
+    logo_url: str | None = None
+
+
 class TransactionOut(ORM):
     id: int
     date: dt.date
@@ -117,6 +123,8 @@ class TransactionOut(ORM):
     lines: list[LineOut]
     receipts: list[ReceiptBrief] = []
     reconciled: bool = False
+    merchant: MerchantBrief | None = None
+    merchant_locked: bool = False
     created_at: dt.datetime
     updated_at: dt.datetime
 

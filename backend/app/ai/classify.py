@@ -157,7 +157,10 @@ liability account, NOT an expense.
 own accounts (e.g. online payment accounts, savings), never income or expense.
 - Use the user's past classifications as strong evidence.
 - Never invent account codes. Answer with JSON only:
-{{"account_code": "<code>", "confidence": <0..1>, "reason": "<short reason in {lang}>", "counterparty": "<clean merchant or person name>"}}"""
+{{"account_code": "<code>", "confidence": <0..1>, "reason": "<short reason in {lang}>", \
+"counterparty": "<clean merchant or person name>", "merchant": "<brand / shop name without branch, city or \
+legal form, e.g. 'Migros' for 'Migros M Dorigny'; null for people and own-account transfers>", \
+"merchant_domain": "<the merchant's main website domain if you are confident, e.g. 'migros.ch', else null>"}}"""
 
 
 def classify_with_ai(db: Session, tx: Transaction) -> bool:
@@ -224,6 +227,12 @@ def classify_with_ai(db: Session, tx: Transaction) -> bool:
     cp = str(data.get("counterparty") or "").strip()
     if cp and not tx.counterparty:
         tx.counterparty = cp[:255]
+    if tx.merchant_id is None and not tx.merchant_locked:
+        from ..merchants import Matcher
+
+        mname = data.get("merchant")
+        Matcher(db, ledger).detect(tx, ai_name=str(mname)[:120] if isinstance(mname, str) else None,
+                                   ai_domain=data.get("merchant_domain") if isinstance(data.get("merchant_domain"), str) else None)
     min_conf = float(get_setting(ledger, "ai_min_confidence", 0.0) or 0.0)
     if conf < min_conf:
         tx.ai_reason = f"Suggestion {target.code} {target.name} ({conf:.0%}): {reason}"

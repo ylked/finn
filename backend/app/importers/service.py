@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from ..accounting import LineIn, create_transaction, get_setting, set_opening_balance, suspense_account
 from ..ai.classify import apply_rules
 from ..ai.receipts import rematch_unmatched
+from ..config import get_settings
 from ..matching import find_line_match
+from ..merchants import Matcher
 from ..models import Account, BankEntry, ImportBatch, JournalLine, Ledger, Transaction
 from .camt053 import ParsedEntry, ParsedStatement
 
@@ -42,7 +44,8 @@ def sha256(content: bytes) -> str:
 
 
 def book_entry(
-    db: Session, ledger: Ledger, account: Account, be: BankEntry, user_id: int | None, *, allow_match: bool = True
+    db: Session, ledger: Ledger, account: Account, be: BankEntry, user_id: int | None, *, allow_match: bool = True,
+    matcher: Matcher | None = None,
 ) -> tuple[str, Transaction]:
     """Reconcile with an existing line or create a new suspense transaction. Returns (how, tx)."""
     if allow_match and get_setting(ledger, "auto_match", True):
@@ -55,6 +58,8 @@ def book_entry(
             line.bank_entry_id = be.id
             if be.orig_amount is not None and line.orig_amount is None:
                 line.orig_amount, line.orig_currency = be.orig_amount, be.orig_currency
+            if line.transaction.merchant_id is None:
+                (matcher or Matcher(db, ledger)).detect(line.transaction, guess=False)
             return "matched", line.transaction
 
     suspense = suspense_account(db, ledger.id)
@@ -72,10 +77,14 @@ def book_entry(
         counterparty=be.counterparty,
         user_id=user_id,
     )
+    matcher = matcher or Matcher(db, ledger)
     if apply_rules(db, tx):
         tx.ai_status = "done"
+        matcher.detect(tx)
         return "rule", tx
     tx.ai_status = "pending" if get_setting(ledger, "auto_classify", True) else "none"
+    # when the AI will look at it, let it name unknown merchants instead of guessing from the text now
+    matcher.detect(tx, guess=not (tx.ai_status == "pending" and get_settings().ai_enabled))
     return "new", tx
 
 
@@ -135,6 +144,7 @@ def import_entries(
             )
         )
     )
+    matcher = Matcher(db, ledger)
     for e in entries:
         if e.amount == 0:
             res.zero += 1
@@ -167,7 +177,7 @@ def import_entries(
         be.batch = batch
         db.add(be)
         db.flush()
-        how, _ = book_entry(db, ledger, account, be, user_id)
+        how, _ = book_entry(db, ledger, account, be, user_id, matcher=matcher)
         res.new += 1
         if how == "matched":
             res.matched += 1

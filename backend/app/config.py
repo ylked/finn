@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     mcp_oauth: bool = False
     mcp_oauth_audience: str = ""  # expected "aud"; defaults to OIDC_CLIENT_ID
 
+    # merchant logos, fetched by the server from the merchant's website and cached in the database
+    merchant_logos: bool = True
+    # "duckduckgo": when a website blocks the fetch, ask icons.duckduckgo.com (sees only the domain); "none"
+    merchant_logo_fallback: str = "duckduckgo"
+
     @property
     def ai_enabled(self) -> bool:
         return bool(self.ai_base_url and self.ai_text_model)

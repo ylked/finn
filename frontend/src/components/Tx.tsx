@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowRightLeft, Bot, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
+import { ArrowRightLeft, Bot, Store, CheckCircle2, Link2, Lock, Paperclip, Plus, Scale, Sparkles, Trash2, Unlink, UserPlus, Wand2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -8,6 +8,7 @@ import { accountLabel, useAccounts, useRefreshLedger } from '../lib/hooks'
 import { useI18n } from '../lib/i18n'
 import type { Account, BankEntry, Transaction } from '../lib/types'
 import { AccountPicker } from './AccountPicker'
+import { MerchantLogo, MerchantPicker, TxMerchant, useRefreshMerchants } from './Merchant'
 import { Badge, Field, Money, Segmented, Sheet, useToast } from './ui'
 
 const PAYMENT = ['bank', 'credit_card', 'cash']
@@ -33,16 +34,18 @@ export function StateBadge({ tx }: { tx: Transaction }) {
   return null
 }
 
-export function TxRow({ tx, onClick, selected, onSelect }: { tx: Transaction; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void }) {
+/** `raw`: title with the statement name ("Migros M Dorigny") instead of the merchant, e.g. on a merchant's page. */
+export function TxRow({ tx, onClick, selected, onSelect, raw = false }: { tx: Transaction; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; raw?: boolean }) {
   const { locale } = useI18n()
   const amt = txAmount(tx)
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 md:px-4">
       {onSelect && <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />}
       <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={onClick}>
-        <div className="w-12 shrink-0 text-xs leading-tight text-slate-500 tnum">{fmtDate(tx.date, locale).slice(0, 5)}</div>
+        <div className="w-10 shrink-0 text-xs leading-tight text-slate-500 tnum">{fmtDate(tx.date, locale).slice(0, 5)}</div>
+        {tx.merchant ? <MerchantLogo m={tx.merchant} /> : <span className="w-8 shrink-0" />}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{tx.counterparty || tx.description}</div>
+          <div className="truncate text-sm font-medium">{(raw ? null : tx.merchant?.name) || tx.counterparty || tx.description}</div>
           <div className="flex items-center gap-1.5 truncate text-xs text-slate-500">
             <StateBadge tx={tx} />
             {tx.receipts.length > 0 && <Paperclip className="h-3 w-3 shrink-0" />}
@@ -201,6 +204,8 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
           <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} disabled={locked} />
         </Field>
       </div>
+
+      {!locked && <TxMerchant tx={tx} />}
 
       {/* lines */}
       <div>
@@ -551,6 +556,24 @@ export type Selection = ReturnType<typeof useSelection>
 export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
   const { t } = useI18n()
   const [moving, setMoving] = useState(false)
+  const [pickMerchant, setPickMerchant] = useState(false)
+  const toast = useToast()
+  const refresh = useRefreshMerchants()
+  const setMerchant = useMutation({
+    mutationFn: (c: { merchant_id: number } | { name: string } | { none: true }) =>
+      api.post<{ updated: number }>('/api/transactions/bulk-merchant', {
+        ids: [...sel.ids],
+        merchant_id: 'merchant_id' in c ? c.merchant_id : null,
+        name: 'name' in c ? c.name : null,
+      }),
+    onSuccess: (r) => {
+      refresh()
+      toast(t('bulk_done', { n: r.updated }))
+      setPickMerchant(false)
+      sel.stop()
+    },
+    onError: (e) => toast(String((e as Error).message), 'error'),
+  })
   if (!sel.active) return null
   const all = allIds.length > 0 && allIds.every((id) => sel.ids.has(id))
   return (
@@ -561,6 +584,9 @@ export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
           <button className="rounded-lg px-2 py-1.5 text-sm opacity-80 hover:opacity-100" onClick={() => sel.setIds(all ? new Set() : new Set(allIds))}>
             {all ? t('select_none') : t('select_all')}
           </button>
+          <button className="btn-secondary px-3 text-slate-900" aria-label={t('merchant')} title={t('merchant')} disabled={!sel.ids.size} onClick={() => setPickMerchant(true)}>
+            <Store className="h-4 w-4" />
+          </button>
           <button className="btn-primary px-3" aria-label={t('bulk_move')} disabled={!sel.ids.size} onClick={() => setMoving(true)}>
             <ArrowRightLeft className="h-4 w-4" /> <span className="hidden sm:inline">{t('bulk_move')}</span>
           </button>
@@ -569,6 +595,7 @@ export function BulkBar({ sel, allIds }: { sel: Selection; allIds: number[] }) {
           </button>
         </div>
       </div>
+      <MerchantPicker open={pickMerchant} onClose={() => setPickMerchant(false)} title={t('merchant_set_n', { n: sel.ids.size })} onPick={(c) => setMerchant.mutate(c)} />
       <BulkMoveSheet open={moving} ids={[...sel.ids]} onClose={() => setMoving(false)} onDone={() => { setMoving(false); sel.stop() }} />
     </>
   )

@@ -66,6 +66,8 @@ export interface Transaction {
   lines: Line[]
   receipts: { id: number; filename: string; mime_type: string; status: string }[]
   reconciled: boolean
+  merchant: MerchantBrief | null
+  merchant_locked: boolean
   bank_entries?: BankEntry[]
   created_at: string
   updated_at: string
@@ -151,4 +153,20 @@ export interface Me {
   role: 'owner' | 'editor' | 'viewer'
   ledgers: { id: number; name: string; role: string }[]
   features: { ai: boolean; vision: boolean; auth: string }
+}
+
+export interface MerchantBrief {
+  id: number
+  name: string
+  logo_url: string | null
+}
+
+export interface Merchant extends MerchantBrief {
+  domain: string | null
+  patterns: string[]
+  catalog_key: string | null
+  logo_status: 'none' | 'ok' | 'failed' | 'custom'
+  tx_count: number
+  total: string
+  last_date: string | null
 }

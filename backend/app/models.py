@@ -16,6 +16,7 @@ from decimal import Decimal
 from sqlalchemy import (
     JSON,
     Boolean,
+    LargeBinary,
     CheckConstraint,
     Date,
     DateTime,
@@ -129,7 +130,11 @@ class Transaction(TimestampMixin, Base):
     ai_reason: Mapped[str | None] = mapped_column(Text)
     ai_attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # who was paid (Migros, Netflix, ...); merchant_locked = chosen by the user, never re-detected
+    merchant_id: Mapped[int | None] = mapped_column(ForeignKey("merchants.id", ondelete="SET NULL"), index=True)
+    merchant_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
+    merchant: Mapped[Merchant | None] = relationship()
     lines: Mapped[list[JournalLine]] = relationship(
         back_populates="transaction", cascade="all, delete-orphan", order_by="JournalLine.position"
     )
@@ -141,6 +146,27 @@ class Transaction(TimestampMixin, Base):
         CheckConstraint("ai_status in ('none','pending','done','failed','skipped')", name="ck_tx_ai_status"),
         Index("ix_tx_ledger_date", "ledger_id", "date"),
     )
+
+
+class Merchant(TimestampMixin, Base):
+    """A shop / payee recognised from statement texts (see merchants.py)."""
+
+    __tablename__ = "merchants"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ledger_id: Mapped[int] = mapped_column(ForeignKey("ledgers.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    # website, used to fetch the logo (its favicon / apple-touch-icon)
+    domain: Mapped[str | None] = mapped_column(String(253))
+    # folded match patterns (see merchants.match), one per entry
+    patterns: Mapped[list] = mapped_column(JSON, default=list)
+    catalog_key: Mapped[str | None] = mapped_column(String(50))
+    logo: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    logo_mime: Mapped[str | None] = mapped_column(String(50))
+    # none (not tried) | ok | failed | custom (uploaded by the user)
+    logo_status: Mapped[str] = mapped_column(String(10), default="none", server_default="none")
+    logo_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("ledger_id", "catalog_key", name="uq_merchant_catalog"),)
 
 
 class JournalLine(Base):
