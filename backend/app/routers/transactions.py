@@ -468,37 +468,58 @@ def book(entry_id: int, c: Ctx = Depends(writer), db: Session = Depends(get_db))
     return to_out(_load(db, c, tx.id), TransactionDetail)
 
 
+def _standalone(tx: Transaction) -> bool:
+    """An entry created from a single statement line, that a link can absorb (and delete)."""
+    return tx.source in ("bank", "csv") and sum(1 for x in tx.lines if x.bank_entry_id) == 1
+
+
 @router.post("/bank-entries/{entry_id}/link/{line_id}", response_model=TransactionDetail)
 def link_entry(entry_id: int, line_id: int, c: Ctx = Depends(writer), db: Session = Depends(get_db)):
-    """Manually reconcile a statement entry with an existing unreconciled line."""
+    """Manually reconcile a statement entry with an existing unreconciled line.
+
+    When the statement entry already has its own entry (the other half of a transfer imported
+    separately), that duplicate is merged in: documents and merchant move over, then it is deleted."""
     be = db.get(BankEntry, entry_id)
     ln = db.get(JournalLine, line_id)
     if be is None or ln is None or be.ledger_id != c.ledger.id or ln.ledger_id != c.ledger.id:
         raise HTTPException(404, "Not found")
     if ln.bank_entry_id or ln.account_id != be.account_id or ln.amount != be.amount:
         raise HTTPException(422, "Line must be on the same account, same amount, and not reconciled yet")
-    # if the entry is currently booked on its own auto-created transaction, drop that one
+    tx = ln.transaction
     if be.line is not None:
         old_tx = be.line.transaction
-        if old_tx.source in ("bank", "csv") and sum(1 for x in old_tx.lines if x.bank_entry_id) == 1:
-            be.line.bank_entry_id = None
-            db.flush()
-            db.delete(old_tx)
-            db.flush()
-        else:
+        if old_tx.id == tx.id or not _standalone(old_tx):
             raise HTTPException(409, "Entry is already reconciled with another transaction")
+        if any(x.invoice_id for x in old_tx.lines) or db.scalar(
+            select(Invoice.id).where(Invoice.transaction_id == old_tx.id).limit(1)
+        ):
+            raise HTTPException(409, "The statement line's entry is linked to an invoice; unlink it first")
+        for r in list(old_tx.receipts):
+            r.transaction = tx
+        if tx.merchant_id is None and old_tx.merchant_id is not None:
+            tx.merchant_id = old_tx.merchant_id
+        if old_tx.notes:
+            tx.notes = f"{tx.notes}\n{old_tx.notes}" if tx.notes else old_tx.notes
+        be.line.bank_entry_id = None
+        db.flush()
+        db.delete(old_tx)
+        db.flush()
     ln.bank_entry_id = be.id
+    if be.orig_amount is not None and ln.orig_amount is None:
+        ln.orig_amount, ln.orig_currency = be.orig_amount, be.orig_currency
     db.commit()
     return to_out(_load(db, c, ln.transaction_id), TransactionDetail)
 
 
 @router.get("/transactions/{tx_id}/match-candidates")
 def match_candidates(tx_id: int, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    """For a manual transaction: statement entries that could reconcile its payment line(s)."""
+    """Statement entries that could back a line of this transaction not linked to a statement yet:
+    same account and amount, within 30 days. Entries still sitting in their own imported entry are
+    included (``merge_with``): linking merges that duplicate in."""
     tx = _load(db, c, tx_id)
     out = []
     for ln in tx.lines:
-        if ln.bank_entry_id or ln.account.kind not in acc_svc.PAYMENT_KINDS:
+        if ln.bank_entry_id or ln.account.kind == "suspense":
             continue
         entries = db.scalars(
             select(BankEntry)
@@ -510,7 +531,19 @@ def match_candidates(tx_id: int, c: Ctx = Depends(ctx), db: Session = Depends(ge
             .order_by(func.abs(BankEntry.booking_date - tx.date))
             .limit(10)
         ).all()
-        out.append({"line_id": ln.id, "entries": [BankEntryOut.model_validate(e) for e in entries]})
+        items = []
+        for e in entries:
+            other = e.line.transaction if e.line is not None else None
+            if other is not None and (other.id == tx.id or not _standalone(other)):
+                continue
+            item = BankEntryOut.model_validate(e).model_dump(mode="json")
+            item["merge_with"] = (
+                {"id": other.id, "description": other.description, "date": other.date.isoformat()} if other else None
+            )
+            items.append(item)
+        if items:
+            out.append({"line_id": ln.id, "account_code": ln.account.code, "account_name": ln.account.name,
+                        "entries": items})
     return out
 
 

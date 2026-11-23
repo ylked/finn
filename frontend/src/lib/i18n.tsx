@@ -146,6 +146,7 @@ const fr = {
   candidates: 'Correspondances possibles',
   link: 'Associer',
   no_candidates: 'Aucune correspondance',
+  link_merges: 'Déjà importée seule (#{id}) : cette écriture en double sera fusionnée ici',
   delete_tx_confirm: 'Supprimer cette écriture ?',
   // new entry
   new_entry: 'Nouvelle écriture',
@@ -631,6 +632,7 @@ const en: Dict = {
   candidates: 'Possible matches',
   link: 'Link',
   no_candidates: 'No match',
+  link_merges: 'Imported on its own (#{id}): that duplicate entry will be merged into this one',
   delete_tx_confirm: 'Delete this entry?',
   new_entry: 'New entry',
   mode_expense: 'Expense',

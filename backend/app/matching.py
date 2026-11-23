@@ -80,7 +80,7 @@ def merge_mirror(db: Session, tx: Transaction) -> list[int]:
 
     Only a clear mirror is merged: same account and signed amount, close in date, the other
     entry created from that single statement line with its other side on suspense or on one
-    of ``tx``'s own accounts, and no invoice attached. Returns the ids of deleted entries.
+    of ``tx``'s own accounts (or not reviewed yet), and no invoice attached. Returns the ids of deleted entries.
     """
     if tx.source == "opening":
         return []
@@ -108,8 +108,10 @@ def merge_mirror(db: Session, tx: Transaction) -> list[int]:
 
         def mirror(c: JournalLine) -> bool:
             d = c.transaction
+            # its other side: still to classify, one of tx's accounts, or an unreviewed guess
             return (
-                all(x is c or (x.bank_entry_id is None and (x.account.kind == "suspense" or x.account_id in others))
+                all(x is c or (x.bank_entry_id is None and (x.account.kind == "suspense" or x.account_id in others
+                                                            or d.state != "confirmed"))
                     for x in d.lines)
                 and not any(x.invoice_id for x in d.lines)
                 and db.scalar(select(Invoice.id).where(Invoice.transaction_id == d.id).limit(1)) is None
@@ -126,8 +128,8 @@ def merge_mirror(db: Session, tx: Transaction) -> list[int]:
         ln.bank_entry_id = be_id
         if c.orig_amount is not None and ln.orig_amount is None:
             ln.orig_amount, ln.orig_currency = c.orig_amount, c.orig_currency
-        for r in db.scalars(select(Receipt).where(Receipt.transaction_id == d.id)):
-            r.transaction_id = tx.id
+        for r in list(d.receipts):
+            r.transaction = tx
         if tx.merchant_id is None and d.merchant_id is not None:
             tx.merchant_id = d.merchant_id
         if d.notes:

@@ -185,6 +185,8 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
   const valid = diff === 0 && lines.length >= 2 && lines.every((l) => l.account_id && lineAmount(l) !== 0)
   const locked = tx.source === 'opening'
   const payLine = lines.find((l) => l.bank_entry_id) ?? lines.find((l) => l.account_id && PAYMENT.includes(byId.get(l.account_id)?.kind ?? ''))
+  // a bank/card/cash side without its statement line yet (e.g. the other half of a transfer)
+  const canLink = !locked && tx.lines.some((l) => !l.bank_entry_id && PAYMENT.includes(l.account_kind ?? ''))
 
   const upd = (key: string, patch: Partial<EditLine>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
   const setAmount = (key: string, side: 'debit' | 'credit', v: string) => upd(key, side === 'debit' ? { debit: v, credit: '' } : { credit: v, debit: '' })
@@ -392,7 +394,7 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
               <div className="break-words">{be.description}</div>
               {be.remittance_info && <div className="break-words">{be.remittance_info}</div>}
               <div className="text-slate-400">{be.tx_code} · {be.bank_ref}</div>
-              {tx.source !== 'bank' && tx.source !== 'csv' && (
+              {((tx.source !== 'bank' && tx.source !== 'csv') || tx.lines.filter((l) => l.bank_entry_id).length > 1) && (
                 <button className="btn-ghost mt-1 px-2 py-1 text-xs" title={t('unlink_help')} onClick={() => { const ln = tx.lines.find((l) => l.bank_entry_id === be.id); if (ln?.id && confirm(t('unlink_help'))) action.mutate({ unlink: ln.id }) }}>
                   <Unlink className="h-3.5 w-3.5" /> {t('unlink')}
                 </button>
@@ -410,7 +412,7 @@ export function TxEditor({ tx, onDone, compact = false }: { tx: Transaction; onD
         <div>
           <div className="label">{t('documents')}</div>
           <DocList docs={tx.receipts} upload={uploadDocs} onChanged={refresh} />
-          {!tx.reconciled && tx.source === 'manual' && payLine && (
+          {canLink && (
             <button className="btn-ghost text-sm" onClick={() => setSheet('match')}>
               <Link2 className="h-4 w-4" /> {t('find_statement')}
             </button>
@@ -568,29 +570,36 @@ function RuleSheet({ tx, lines, payKey, onClose }: { tx: Transaction; lines: Edi
   )
 }
 
+type MatchCandidates = { line_id: number; account_code: string; account_name: string; entries: (BankEntry & { merge_with: { id: number; description: string; date: string } | null })[] }[]
+
 function MatchSheet({ tx, onClose, onLink }: { tx: Transaction; onClose: () => void; onLink: (beId: number, lineId: number) => void }) {
   const { t, locale } = useI18n()
   const q = useQuery({
     queryKey: ['match', tx.id],
-    queryFn: () => api.get<{ line_id: number; entries: BankEntry[] }[]>(`/api/transactions/${tx.id}/match-candidates`),
+    queryFn: () => api.get<MatchCandidates>(`/api/transactions/${tx.id}/match-candidates`),
   })
   return (
     <Sheet open onClose={onClose} title={t('candidates')}>
-      {q.data?.every((x) => !x.entries.length) && <p className="text-sm text-slate-500">{t('no_candidates')}</p>}
-      {q.data?.map((x) =>
-        x.entries.map((e) => (
-          <div key={e.id} className="flex items-center gap-3 border-b border-slate-100 py-2 text-sm dark:border-slate-800">
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">{e.counterparty || e.description}</div>
-              <div className="text-xs text-slate-500">{fmtDate(e.booking_date, locale)} · {e.description}</div>
+      {q.isLoading && <div className="py-6 text-center text-slate-400">{t('loading')}</div>}
+      {q.data && !q.data.length && <p className="text-sm text-slate-500">{t('no_candidates')}</p>}
+      {q.data?.map((x) => (
+        <div key={x.line_id} className="mb-3">
+          {q.data.length > 1 && <div className="label">{x.account_code} {x.account_name}</div>}
+          {x.entries.map((e) => (
+            <div key={e.id} className="flex items-center gap-3 border-b border-slate-100 py-2 text-sm dark:border-slate-800">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{e.counterparty || e.description}</div>
+                <div className="truncate text-xs text-slate-500">{fmtDate(e.booking_date, locale)} · {e.description}</div>
+                {e.merge_with && <div className="text-xs text-amber-700 dark:text-amber-400">{t('link_merges', { id: e.merge_with.id })}</div>}
+              </div>
+              <Money value={e.amount} sign colored />
+              <button className="btn-primary px-2.5 py-1 text-xs" onClick={() => onLink(e.id, x.line_id)}>
+                {t('link')}
+              </button>
             </div>
-            <Money value={e.amount} sign colored />
-            <button className="btn-primary px-2.5 py-1 text-xs" onClick={() => onLink(e.id, x.line_id)}>
-              {t('link')}
-            </button>
-          </div>
-        )),
-      )}
+          ))}
+        </div>
+      ))}
     </Sheet>
   )
 }
