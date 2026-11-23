@@ -35,10 +35,16 @@ export function useTxView(accountId: number | null): TxView | undefined {
 
 const payLine = (tx: Transaction) => tx.lines.find((l) => l.bank_entry_id) ?? tx.lines.find((l) => PAYMENT.includes(l.account_kind ?? ''))
 
-/** Money moved between two of one's own accounts (both sides on a statement or a bank/card/cash account). */
+/**
+ * Money moved between one's own accounts, neither spent nor earned: bank/card/cash to each other, or
+ * paying an invoice already counted as an expense (bank -> payable). Shown without a direction.
+ */
 export function isTransfer(tx: Transaction): boolean {
-  return tx.lines.length >= 2 && tx.lines.every((l) => l.bank_entry_id || PAYMENT.includes(l.account_kind ?? ''))
+  const own = (l: Transaction['lines'][number]) => !!l.bank_entry_id || PAYMENT.includes(l.account_kind ?? '')
+  return tx.lines.length >= 2 && tx.lines.some(own) && tx.lines.every((l) => own(l) || l.account_kind === 'payable')
 }
+
+const PL = ['expense', 'income']
 
 /** Lines of the entry on the viewed account, when the entry also touches other accounts. */
 function viewLines(tx: Transaction, view?: TxView) {
@@ -58,10 +64,20 @@ export function txAmount(tx: Transaction, view?: TxView): number {
     const s = own.reduce((a, l) => a + num(l.amount), 0)
     return view!.flip ? -s : s
   }
-  if (isTransfer(tx)) return tx.lines.filter((l) => num(l.amount) > 0).reduce((s, l) => s + num(l.amount), 0)
+  if (isTransfer(tx)) return positive(tx)
   const pay = payLine(tx)
   if (pay) return num(pay.amount)
-  return tx.lines.filter((l) => num(l.amount) > 0).reduce((s, l) => s + num(l.amount), 0)
+  // no money moved yet (an invoice booked, an accrual…): what it does to the result, spending - and income +
+  const pl = tx.lines.filter((l) => PL.includes(l.account_type ?? ''))
+  if (pl.length) return -pl.reduce((s, l) => s + num(l.amount), 0)
+  return positive(tx)
+}
+
+const positive = (tx: Transaction) => tx.lines.filter((l) => num(l.amount) > 0).reduce((s, l) => s + num(l.amount), 0)
+
+/** Entries shown without + / - nor color: transfers, and moves with neither money nor result involved. */
+export function isNeutral(tx: Transaction): boolean {
+  return isTransfer(tx) || (!payLine(tx) && !tx.lines.some((l) => PL.includes(l.account_type ?? '')))
 }
 
 export function counterLabel(tx: Transaction, view?: TxView): string {
@@ -71,7 +87,9 @@ export function counterLabel(tx: Transaction, view?: TxView): string {
     return `${names(false)} → ${names(true)}`
   }
   const pay = payLine(tx)
-  const others = tx.lines.filter((l) => (own ? !own.includes(l) : l !== pay))
+  const pl = tx.lines.filter((l) => PL.includes(l.account_type ?? ''))
+  // without a money side (an invoice booked…), the categories say what it is
+  const others = own ? tx.lines.filter((l) => !own.includes(l)) : pay ? tx.lines.filter((l) => l !== pay) : pl.length ? pl : tx.lines
   if (others.length === 1) return `${others[0].account_code} ${others[0].account_name}`
   return others.map((l) => l.account_code).join(' · ')
 }
@@ -113,7 +131,7 @@ export function StateBadge({ tx }: { tx: Transaction }) {
 export function TxRow({ tx, onClick, selected, onSelect, raw = false, view }: { tx: Transaction; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; raw?: boolean; view?: TxView }) {
   const { locale } = useI18n()
   const amt = txAmount(tx, view)
-  const neutral = !viewLines(tx, view) && isTransfer(tx)
+  const neutral = !viewLines(tx, view) && isNeutral(tx)
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 md:px-4">
       {onSelect && <input type="checkbox" className="h-4 w-4 accent-brand-700" checked={!!selected} onChange={(e) => onSelect(e.target.checked)} />}

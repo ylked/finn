@@ -25,6 +25,7 @@ export interface Line {
   account_code?: string
   account_name?: string
   account_kind?: AccountKind
+  account_type?: string
   amount: string
   memo?: string | null
   orig_amount?: string | null

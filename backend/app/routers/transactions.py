@@ -55,6 +55,7 @@ def to_out(tx: Transaction, cls=TransactionOut):
             account_code=ln.account.code,
             account_name=ln.account.name,
             account_kind=ln.account.kind,
+            account_type=ln.account.type,
             amount=ln.amount,
             memo=ln.memo,
             orig_amount=ln.orig_amount,

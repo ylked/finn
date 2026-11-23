@@ -89,6 +89,7 @@ class LineOut(ORM):
     account_code: str
     account_name: str
     account_kind: str
+    account_type: str = ""
     amount: Decimal
     memo: str | None
     orig_amount: Decimal | None
