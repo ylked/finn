@@ -119,7 +119,7 @@ export function SettingsPage() {
 }
 
 type ApiToken = { id: number; name: string; prefix: string; can_write: boolean; created_at: string; last_used_at: string | null; expires_at: string | null }
-type McpInfo = { enabled: boolean; url: string; oauth: boolean }
+type McpInfo = { enabled: boolean; url: string; inbox_url: string; oauth: boolean }
 
 function CopyButton({ text }: { text: string }) {
   const { t } = useI18n()
@@ -155,22 +155,41 @@ function McpCard() {
     mutationFn: (id: number) => api.del(`/api/tokens/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tokens'] }),
   })
-  if (info.data && !info.data.enabled) {
-    return <div className="card p-4"><div className="font-medium">{t('mcp')}</div><p className="mt-1 text-xs text-slate-500">{t('mcp_disabled')}</p></div>
-  }
+  const url = (label: string, value: string) => (
+    <Field label={label}>
+      <div className="flex gap-2">
+        <input className="input font-mono text-xs" readOnly value={value} onFocus={(e) => e.target.select()} />
+        <CopyButton text={value} />
+      </div>
+    </Field>
+  )
   return (
     <div className="card space-y-3 p-4">
-      <div className="flex items-center gap-2 font-medium"><KeyRound className="h-4 w-4" />{t('mcp')}</div>
-      <p className="text-xs text-slate-500">{t('mcp_help')}</p>
-      {info.data && (
-        <Field label={t('mcp_url')}>
-          <div className="flex gap-2">
-            <input className="input font-mono text-xs" readOnly value={info.data.url} onFocus={(e) => e.target.select()} />
-            <CopyButton text={info.data.url} />
-          </div>
-        </Field>
-      )}
-      {info.data?.oauth && <p className="text-xs text-slate-500">{t('mcp_oauth_on')}</p>}
+      <div className="flex items-center gap-2 font-medium"><KeyRound className="h-4 w-4" />{t('api_access')}</div>
+      <p className="text-xs text-slate-500">{t('api_access_help')}</p>
+
+      <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+        <div className="text-sm font-medium">{t('mcp')}</div>
+        {info.data && !info.data.enabled ? <p className="text-xs text-slate-500">{t('mcp_disabled')}</p> : (
+          <>
+            <p className="text-xs text-slate-500">{t('mcp_help')}</p>
+            {info.data && url(t('mcp_url'), info.data.url)}
+            {info.data?.oauth && <p className="text-xs text-slate-500">{t('mcp_oauth_on')}</p>}
+          </>
+        )}
+      </div>
+
+      <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/50">
+        <div className="text-sm font-medium">{t('shortcuts')}</div>
+        <p className="text-xs text-slate-500">{t('shortcuts_help')}</p>
+        {info.data && url(t('shortcuts_url'), info.data.inbox_url)}
+        <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-600 dark:text-slate-400">
+          <li>{t('shortcuts_step1')}</li>
+          <li>{t('shortcuts_step2')}</li>
+          <li>{t('shortcuts_step3')}</li>
+          <li>{t('shortcuts_step4')}</li>
+        </ol>
+      </div>
 
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {tokens.data?.map((k) => (

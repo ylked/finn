@@ -11,7 +11,7 @@ from . import auth
 from .config import get_settings
 from .db import engine
 from .mcp_server import MCPHost
-from .routers import accounts, imports, insights, invoices, merchants, receipts, reports, tokens, transactions
+from .routers import accounts, imports, inbox, insights, invoices, merchants, receipts, reports, tokens, transactions
 from .worker import worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -49,6 +49,8 @@ async def csrf_and_headers(request: Request, call_next):
         and not request.url.path.startswith("/api/auth/")
         and request.method in ("POST", "PUT", "PATCH", "DELETE")
         and request.headers.get("x-finn") != "1"
+        # token clients (Apple Shortcuts...): a bearer token is never sent by a browser on its own
+        and not (request.url.path == "/api/inbox" and request.headers.get("authorization", "").lower().startswith("bearer "))
     ):
         return JSONResponse({"detail": "Missing X-Finn header"}, status_code=403)
     response = await call_next(request)
@@ -70,7 +72,7 @@ api.add_middleware(
 )
 
 for r in (auth.router, accounts.router, merchants.router, transactions.router, imports.router, receipts.router,
-          reports.router, insights.router, invoices.router, tokens.router):
+          reports.router, insights.router, invoices.router, tokens.router, inbox.router):
     api.include_router(r)
 
 

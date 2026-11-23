@@ -96,6 +96,23 @@ authentik issues for Finn's OIDC application, and it advertises authentik throug
 (`https://claude.ai/api/mcp/auth_callback`) to the provider's redirect URIs. In the connector's advanced
 settings, enter Finn's client ID and secret. The authentik user must have logged in to Finn once.
 
+### Sending documents (Apple Shortcuts, scripts)
+
+`POST /api/inbox` takes PDFs or photos with a personal access token (Settings → API access, with
+write access). `?kind=receipt` (default) puts them in the receipts queue; `?kind=invoice` creates
+invoices to pay. Either way the AI reads them in the background.
+
+```sh
+curl -H "Authorization: Bearer finn_…" -F file=@facture.pdf "https://finn.example.com/api/inbox?kind=invoice"
+curl -H "Authorization: Bearer finn_…" -H "Content-Type: application/pdf" --data-binary @ticket.pdf \
+     "https://finn.example.com/api/inbox?filename=ticket.pdf"
+```
+
+The body is a multipart form (any file field, several files allowed) or the raw file. The JSON
+answer has a `message` to show and a `url` to open. In Shortcuts: a share-sheet shortcut accepting
+PDFs and images, then "Get Contents of URL" with method POST, the `Authorization` header, and
+request body "Form" with a field `file` (type File) set to the Shortcut Input.
+
 ### Local development
 
 ```bash

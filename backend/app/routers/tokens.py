@@ -1,4 +1,4 @@
-"""Personal access tokens, used by MCP clients (Claude, Cursor, ...) to reach /mcp.
+"""Personal access tokens: MCP clients (Claude, Cursor, ...) on /mcp, scripts and Apple Shortcuts on /api/inbox.
 
 The plain token is shown once at creation; only its SHA-256 hash is stored.
 """
@@ -90,5 +90,6 @@ def mcp_info():
     return {
         "enabled": s.mcp_enabled,
         "url": s.app_base_url.rstrip("/") + "/mcp",
+        "inbox_url": s.app_base_url.rstrip("/") + "/api/inbox",
         "oauth": s.mcp_enabled and s.mcp_oauth and s.auth_mode == "oidc",
     }
