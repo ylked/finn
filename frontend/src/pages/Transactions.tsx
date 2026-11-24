@@ -17,7 +17,7 @@ export function Transactions() {
   const { t, locale } = useI18n()
   const [sp, setSp] = useSearchParams()
   const { byId } = useAccounts()
-  const [open, setOpen] = useState<number | null>(null)
+  const [open, setOpen] = useState<number | null>(sp.get('open') ? Number(sp.get('open')) : null)
   const [showFilters, setShowFilters] = useState(false)
   const sel = useSelection()
   const accountId = sp.get('account_id') ? Number(sp.get('account_id')) : null

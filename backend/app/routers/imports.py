@@ -12,7 +12,7 @@ from ..auth import Ctx, ctx, writer
 from ..db import get_db
 from ..importers import camt053, csv_import
 from ..importers.service import DuplicateFile, import_entries, reconciliation, sha256
-from ..models import Account, BankEntry, CsvProfile, ImportBatch, JournalLine
+from ..models import Account, BankEntry, CsvProfile, ImportBatch, JournalLine, Transaction
 from ..schemas import BatchOut, CsvProfileIn, CsvProfileOut
 from ..worker import worker
 
@@ -254,12 +254,29 @@ def account_reconciliation(account_id: int, c: Ctx = Depends(ctx), db: Session =
     if last is None:
         return {"has_statement": False}
     rec = reconciliation(db, acc, last.to_date)
+    # entries on this account that no statement line backs: the usual cause of a difference
+    # (a transfer whose other half was booked elsewhere, an entry typed by hand or from a receipt)
+    q = (
+        select(JournalLine, Transaction)
+        .join(Transaction)
+        .where(JournalLine.account_id == acc.id, JournalLine.bank_entry_id.is_(None),
+               Transaction.source != "opening", Transaction.date <= last.to_date)
+    )
+    if acc.opening_date:
+        q = q.where(Transaction.date >= acc.opening_date)
+    sign = 1 if acc.type in ("asset", "expense") else -1
+    unbacked = [
+        {"transaction_id": tx.id, "date": tx.date, "description": tx.description,
+         "amount": sign * ln.amount, "state": tx.state}
+        for ln, tx in db.execute(q.order_by(Transaction.date.desc()).limit(50))
+    ]
     return {
         "has_statement": True,
         "statement_date": last.to_date,
         "closing_balance": last.closing_balance,
         **rec,
         "difference": rec["ledger_balance"] - last.closing_balance,
+        "unbacked": unbacked,
     }
 
 

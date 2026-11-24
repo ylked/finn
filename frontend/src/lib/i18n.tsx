@@ -250,6 +250,7 @@ const fr = {
   show_inactive: 'Afficher les comptes inactifs',
   reconciliation: 'Rapprochement',
   ledger_vs_statement: 'Comptabilité vs relevé au {d}',
+  unbacked_help: 'Écritures sur ce compte sans ligne de relevé correspondante (souvent la cause de l’écart) : saisie manuelle, justificatif, ou moitié d’un virement classée ailleurs.',
   // reports
   reports: 'Rapports',
   balance_sheet: 'Bilan',
@@ -743,6 +744,7 @@ const en: Dict = {
   show_inactive: 'Show inactive accounts',
   reconciliation: 'Reconciliation',
   ledger_vs_statement: 'Books vs statement on {d}',
+  unbacked_help: 'Entries on this account with no matching statement line (usually what causes the gap): typed by hand, from a receipt, or half of a transfer classified elsewhere.',
   reports: 'Reports',
   balance_sheet: 'Balance sheet',
   income_statement: 'Income statement',

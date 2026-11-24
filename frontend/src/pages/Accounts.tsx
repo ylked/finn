@@ -86,7 +86,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
   const [opening, setOpening] = useState({ amount: account?.opening_balance ?? '', date: account?.opening_date ?? '' })
   const rec = useQuery({
     queryKey: ['reconciliation', account?.id],
-    queryFn: () => api.get<{ has_statement: boolean; statement_date?: string; closing_balance?: string; ledger_balance?: string; difference?: string; unbooked_entries?: number }>(`/api/accounts/${account!.id}/reconciliation`),
+    queryFn: () => api.get<{ has_statement: boolean; statement_date?: string; closing_balance?: string; ledger_balance?: string; difference?: string; unbooked_entries?: number; unbacked?: { transaction_id: number; date: string; description: string | null; amount: string; state: string }[] }>(`/api/accounts/${account!.id}/reconciliation`),
     enabled: !!account && ['bank', 'credit_card'].includes(account.kind),
   })
   const err = (e: unknown) => toast(String((e as Error).message), 'error')
@@ -118,6 +118,19 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
             <div className="flex justify-between"><span>{t('statement_balance')}</span><Money value={rec.data.closing_balance} /></div>
             <div className="flex justify-between"><span>{t('balance')}</span><Money value={rec.data.ledger_balance} /></div>
             <div className="flex justify-between font-medium"><span>{t('difference')}</span><Money value={rec.data.difference} /></div>
+            {num(rec.data.difference) !== 0 && !!rec.data.unbacked?.length && (
+              <div className="mt-2 space-y-1 border-t border-amber-200 pt-2 dark:border-amber-900">
+                <div className="text-xs text-slate-600 dark:text-slate-400">{t('unbacked_help')}</div>
+                {rec.data.unbacked.map((u) => (
+                  <Link key={u.transaction_id} to={`/transactions?account_id=${account!.id}&open=${u.transaction_id}`} className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-amber-100 dark:hover:bg-amber-900/40">
+                    <span className="shrink-0 text-xs text-slate-500">{fmtDate(u.date, locale)}</span>
+                    <span className="min-w-0 flex-1 truncate">{u.description || '—'}</span>
+                    <Money value={u.amount} colored />
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="grid grid-cols-3 gap-2">
